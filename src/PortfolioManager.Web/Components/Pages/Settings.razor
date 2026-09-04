@@ -1,0 +1,253 @@
+@page "/settings"
+@rendermode InteractiveServer
+@inject PortfolioService PortfolioService
+@using PortfolioManager.Core.Models
+
+<PageTitle>Settings – Portfolio Manager</PageTitle>
+
+<div class="pm-page-header">
+    <h1>⚙ Settings</h1>
+</div>
+
+<!-- ── Accounts ──────────────────────────────────────────────────── -->
+<div class="pm-panel">
+    <div class="pm-panel-header">
+        Accounts
+        <button class="btn btn-success btn-sm" @onclick="StartAdd">➕ Add Account</button>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="pm-alert pm-alert-danger" style="margin:12px 16px">@_error</div>
+    }
+
+    @if (_showAddForm)
+    {
+        <div class="pm-panel-body" style="border-bottom:1px solid var(--border)">
+            <strong style="color:var(--accent)">New Account</strong>
+            <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-top:10px">
+                <div class="pm-field">
+                    <label class="pm-label">Name</label>
+                    <input class="pm-input" style="width:180px" @bind="_newName" placeholder="e.g. TFSA RBC" />
+                </div>
+                <div class="pm-field">
+                    <label class="pm-label">Type</label>
+                    <select class="pm-select" @bind="_newType">
+                        @foreach (var t in Enum.GetValues<AccountType>())
+                        {
+                            <option value="@t">@t</option>
+                        }
+                    </select>
+                </div>
+                <div class="pm-field">
+                    <label class="pm-label">Owner</label>
+                    <input class="pm-input" style="width:140px" @bind="_newOwner" placeholder="e.g. Primary" />
+                </div>
+                <button class="btn btn-primary btn-sm" @onclick="SaveAddAsync">Save</button>
+                <button class="btn btn-secondary btn-sm" @onclick="CancelAdd">Cancel</button>
+            </div>
+        </div>
+    }
+
+    @if (_accounts.Count == 0)
+    {
+        <div style="padding:16px;color:var(--text-muted);font-style:italic">No accounts yet. Add one above.</div>
+    }
+    else
+    {
+        <div class="pm-table-wrap">
+            <table class="pm-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Owner</th>
+                        <th class="text-right">Cash CAD</th>
+                        <th class="text-right">Cash USD</th>
+                        <th class="text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var acct in _accounts)
+                    {
+                        @if (_editingId == acct.Id)
+                        {
+                            <tr style="background:var(--bg-elevated)">
+                                <td>
+                                    <input class="pm-input" style="width:180px" @bind="_editName" />
+                                </td>
+                                <td>
+                                    <select class="pm-select" @bind="_editType">
+                                        @foreach (var t in Enum.GetValues<AccountType>())
+                                        {
+                                            <option value="@t">@t</option>
+                                        }
+                                    </select>
+                                </td>
+                                <td>
+                                    <input class="pm-input" style="width:140px" @bind="_editOwner" />
+                                </td>
+                                <td class="text-right" style="color:var(--text-muted)">@acct.CashCAD.ToString("C2")</td>
+                                <td class="text-right" style="color:var(--text-muted)">@acct.CashUSD.ToString("C2")</td>
+                                <td class="text-center" style="white-space:nowrap">
+                                    <button class="btn btn-success btn-sm" @onclick="@(() => SaveEditAsync(acct.Id))">✓</button>
+                                    <button class="btn btn-secondary btn-sm" @onclick="CancelEdit">✕</button>
+                                </td>
+                            </tr>
+                        }
+                        else
+                        {
+                            <tr>
+                                <td><strong>@acct.Name</strong></td>
+                                <td><span class="badge @AccountTypeBadge(acct.Type)">@acct.Type</span></td>
+                                <td>@acct.Owner</td>
+                                <td class="text-right">@acct.CashCAD.ToString("C2")</td>
+                                <td class="text-right">@acct.CashUSD.ToString("C2")</td>
+                                <td class="text-center" style="white-space:nowrap">
+                                    <button class="btn btn-secondary btn-sm" @onclick="@(() => StartEdit(acct))">✏</button>
+                                    <button class="btn btn-danger btn-sm" @onclick="@(() => ConfirmDelete(acct))">🗑</button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<!-- Delete confirm modal -->
+@if (_deleteTarget is not null)
+{
+    <div class="pm-modal-backdrop">
+        <div class="pm-modal">
+            <div class="pm-modal-header">Delete Account</div>
+            <div class="pm-modal-body">
+                <p>Delete <strong>@_deleteTarget.Name</strong>?<br />
+                <span style="color:var(--red);font-size:0.85rem">This will permanently remove all positions and transactions for this account.</span></p>
+            </div>
+            <div class="pm-modal-footer">
+                <button class="btn btn-danger" @onclick="ExecuteDeleteAsync">Delete</button>
+                <button class="btn btn-secondary" @onclick="@(() => _deleteTarget = null)">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    List<Account> _accounts = [];
+    string? _error;
+
+    // Add form
+    bool _showAddForm;
+    string _newName = "";
+    AccountType _newType = AccountType.TFSA;
+    string _newOwner = "";
+
+    // Edit
+    int? _editingId;
+    string _editName = "";
+    AccountType _editType;
+    string _editOwner = "";
+
+    // Delete
+    Account? _deleteTarget;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    async Task LoadAsync()
+    {
+        _accounts = await PortfolioService.GetAccountsAsync();
+    }
+
+    void StartAdd()
+    {
+        _showAddForm = true;
+        _newName = "";
+        _newOwner = "";
+        _newType = AccountType.TFSA;
+        _error = null;
+    }
+
+    void CancelAdd()
+    {
+        _showAddForm = false;
+        _error = null;
+    }
+
+    async Task SaveAddAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_newName) || string.IsNullOrWhiteSpace(_newOwner))
+        {
+            _error = "Name and Owner are required.";
+            return;
+        }
+        try
+        {
+            await PortfolioService.AddAccountAsync(_newName.Trim(), _newType, _newOwner.Trim());
+            _showAddForm = false;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    void StartEdit(Account acct)
+    {
+        _editingId = acct.Id;
+        _editName = acct.Name;
+        _editType = acct.Type;
+        _editOwner = acct.Owner;
+        _error = null;
+    }
+
+    void CancelEdit()
+    {
+        _editingId = null;
+        _error = null;
+    }
+
+    async Task SaveEditAsync(int accountId)
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_editName) || string.IsNullOrWhiteSpace(_editOwner))
+        {
+            _error = "Name and Owner are required.";
+            return;
+        }
+        try
+        {
+            await PortfolioService.UpdateAccountAsync(accountId, _editName.Trim(), _editType, _editOwner.Trim());
+            _editingId = null;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    void ConfirmDelete(Account acct)
+    {
+        _deleteTarget = acct;
+        _error = null;
+    }
+
+    async Task ExecuteDeleteAsync()
+    {
+        if (_deleteTarget is null) return;
+        try
+        {
+            await PortfolioService.DeleteAccountAsync(_deleteTarget.Id);
+            _deleteTarget = null;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    static string AccountTypeBadge(AccountType t) => t switch
+    {
+        AccountType.Margin => "badge-margin",
+        AccountType.TFSA   => "badge-tfsa",
+        AccountType.RRSP   => "badge-rrsp",
+        AccountType.RESP   => "badge-resp",
+        _                  => "badge-secondary"
+    };
+}

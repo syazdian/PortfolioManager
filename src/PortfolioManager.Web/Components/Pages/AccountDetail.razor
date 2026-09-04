@@ -1,0 +1,399 @@
+@page "/account/{AccountId:int}"
+@rendermode InteractiveServer
+@inject PortfolioService PortfolioService
+@inject PriceState PriceState
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>Account Detail – Portfolio Manager</PageTitle>
+
+@if (_account is null)
+{
+    <p style="color:var(--text-muted)">Loading…</p>
+}
+else
+{
+    <div class="pm-page-header">
+        <div>
+            <h1>
+                @_account.Name
+                <span class="badge @AccountTypeBadge(_account.Type)" style="font-size:0.6em;vertical-align:middle">@_account.Type</span>
+                <span class="badge badge-owner" style="font-size:0.6em;vertical-align:middle">@_account.Owner</span>
+            </h1>
+        </div>
+        <button class="btn btn-secondary" @onclick="GoBack">← Dashboard</button>
+    </div>
+
+    <!-- Stat Cards -->
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="label">Cash CAD</div>
+            <div class="value">@_account.CashCAD.ToString("C2", CadCulture)</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Cash USD</div>
+            <div class="value">@_account.CashUSD.ToString("C2", UsdCulture)</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Open Positions</div>
+            <div class="value">@_positions.Count</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Total P&amp;L</div>
+            <div class="value @PnlClass(TotalPnL)">@TotalPnL.ToString("+0.00;-0.00;0.00")</div>
+        </div>
+    </div>
+
+    <!-- Update Cash -->
+    <div class="pm-panel" style="max-width:520px;margin-bottom:20px">
+        <div class="pm-panel-header">Update Cash Balances</div>
+        <div class="pm-panel-body">
+            <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+                <div class="pm-field">
+                    <label class="pm-label">Cash CAD</label>
+                    <input class="pm-input" style="width:160px" type="number" step="0.01" @bind="_editCashCAD" />
+                </div>
+                <div class="pm-field">
+                    <label class="pm-label">Cash USD</label>
+                    <input class="pm-input" style="width:160px" type="number" step="0.01" @bind="_editCashUSD" />
+                </div>
+                <button class="btn btn-primary btn-sm" @onclick="SaveCashAsync">Save</button>
+                @if (_cashSaved) { <span style="color:var(--green);font-size:0.85rem">✓ Saved</span> }
+            </div>
+        </div>
+    </div>
+
+    <!-- Positions Table -->
+    <div class="pm-panel">
+        <div class="pm-panel-header">
+            Open Positions
+            <button class="btn btn-success btn-sm" @onclick="GoToAddPosition">➕ Add Position</button>
+        </div>
+        @if (_positions.Count == 0)
+        {
+            <div style="padding:16px;color:var(--text-muted);font-style:italic">No open positions.</div>
+        }
+        else
+        {
+            <div class="pm-table-wrap">
+                <table class="pm-table">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Type</th>
+                            <th>Dir</th>
+                            <th>Exchange</th>
+                            <th class="text-right">Qty</th>
+                            <th class="text-right">Avg Cost</th>
+                            <th class="text-right">Strike</th>
+                            <th>Expiry</th>
+                            <th class="text-right">Last Price</th>
+                            <th class="text-right">Mkt Value</th>
+                            <th class="text-right">P&amp;L</th>
+                            <th class="text-right">P&amp;L %</th>
+                            <th>Group</th>
+                            <th class="text-center">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @{
+                            // Partition into named groups and standalone positions
+                            var grouped = _positions
+                                .Where(p => p.SpreadGroupName is not null)
+                                .GroupBy(p => p.SpreadGroupName!)
+                                .ToList();
+                            var standalone = _positions.Where(p => p.SpreadGroupName is null).ToList();
+
+                            // Render named spread groups first
+                            foreach (var grp in grouped)
+                            {
+                                var grpPnl = grp.Sum(p =>
+                                    GetCache(p.Symbol) is { } c
+                                    ? PortfolioService.CalculateUnrealizedPnL(p, c.LastPrice) : 0);
+                                var grpQty = grp.Sum(p => p.Quantity * (p.Direction == PositionDirection.Short ? -1 : 1));
+                                bool isExpanded = !_collapsedGroups.Contains(grp.Key);
+
+                                <!-- GROUP HEADER ROW -->
+                                <tr class="spread-group-header" @onclick="@(() => ToggleGroup(grp.Key))" style="cursor:pointer">
+                                    <td colspan="2">
+                                        <span style="margin-right:6px">@(isExpanded ? "▾" : "▸")</span>
+                                        <strong>@grp.Key</strong>
+                                    </td>
+                                    <td colspan="2" style="color:var(--text-muted);font-size:0.82em">@grp.Count() legs</td>
+                                    <td class="text-right">@grpQty.ToString("+0.##;-0.##;0")</td>
+                                    <td colspan="5"></td>
+                                    <td class="text-right @PnlClass(grpPnl)">@grpPnl.ToString("+0.00;-0.00;0.00")</td>
+                                    <td colspan="2"></td>
+                                </tr>
+
+                                @if (isExpanded)
+                                {
+                                    foreach (var pos in grp)
+                                    {
+                                        var cache  = GetCache(pos.Symbol);
+                                        var price  = cache?.LastPrice;
+                                        var mult   = pos.AssetType == AssetType.Stock ? 1m : 100m;
+                                        var mktVal = price.HasValue ? price.Value * pos.Quantity * mult : (decimal?)null;
+                                        var pnl    = price.HasValue ? PortfolioService.CalculateUnrealizedPnL(pos, price.Value) : (decimal?)null;
+                                        var pnlPct = price.HasValue && pos.AverageCost != 0
+                                            ? (price.Value - pos.AverageCost) / pos.AverageCost * 100 : (decimal?)null;
+                                        var warn   = PortfolioService.IsRuleViolation(_account, pos.AssetType, pos.Direction);
+
+                                        @if (_editingId == pos.Id)
+                                        {
+                                            @* INLINE EDIT ROW (leg) *@
+                                            <tr style="background:var(--bg-elevated)">
+                                                <td style="padding-left:28px" colspan="4">
+                                                    <strong style="color:var(--accent)">✏ @pos.Symbol</strong>
+                                                </td>
+                                                <td class="text-right">
+                                                    <input class="pm-input" style="width:80px" type="number" step="1" @bind="_editQty" />
+                                                </td>
+                                                <td class="text-right">
+                                                    <input class="pm-input" style="width:100px" type="number" step="0.01" @bind="_editCost" />
+                                                </td>
+                                                <td class="text-right">
+                                                    @if (pos.AssetType != AssetType.Stock)
+                                                    {
+                                                        <input class="pm-input" style="width:90px" type="number" step="0.01" @bind="_editStrike" />
+                                                    }
+                                                    else { <span style="color:var(--text-muted)">—</span> }
+                                                </td>
+                                                <td>
+                                                    @if (pos.AssetType != AssetType.Stock)
+                                                    {
+                                                        <input class="pm-input" style="width:130px" type="date" @bind="_editExpiry" />
+                                                    }
+                                                    else { <span style="color:var(--text-muted)">—</span> }
+                                                </td>
+                                                <td>
+                                                    <input class="pm-input" style="width:150px" type="text" @bind="_editGroup" placeholder="Spread group name" />
+                                                </td>
+                                                <td colspan="3"></td>
+                                                <td class="text-center" style="white-space:nowrap">
+                                                    <button class="btn btn-success btn-sm" @onclick="@(() => SaveEditAsync(pos))">✓</button>
+                                                    <button class="btn btn-secondary btn-sm" @onclick="CancelEdit">✕</button>
+                                                </td>
+                                            </tr>
+                                        }
+                                        else
+                                        {
+                                            <tr class="spread-leg">
+                                                <td style="padding-left:28px">
+                                                    @pos.Symbol
+                                                    @if (warn) { <span class="badge badge-warn" title="Rule violation">⚠</span> }
+                                                </td>
+                                                <td><span class="badge @AssetBadge(pos.AssetType)">@pos.AssetType</span></td>
+                                                <td><span class="badge @DirBadge(pos.Direction)">@pos.Direction</span></td>
+                                                <td>@pos.Exchange</td>
+                                                <td class="text-right">@pos.Quantity</td>
+                                                <td class="text-right">@pos.AverageCost.ToString("F2")</td>
+                                                <td class="text-right">@(pos.StrikePrice?.ToString("F2") ?? "—")</td>
+                                                <td>@(pos.ExpiryDate?.ToString("MMM dd ''yy") ?? "—")</td>
+                                                <td class="text-right">@(price?.ToString("F2") ?? "—")</td>
+                                                <td class="text-right">@(mktVal?.ToString("F2") ?? "—")</td>
+                                                <td class="text-right @PnlClass(pnl)">@(pnl?.ToString("+0.00;-0.00;0.00") ?? "—")</td>
+                                                <td class="text-right @PnlClass(pnlPct)">@(pnlPct != null ? pnlPct.Value.ToString("+0.00;-0.00;0.00") + "%" : "—")</td>
+                                                <td class="text-center">
+                                                    <button class="btn btn-secondary btn-sm" @onclick="@(() => StartEdit(pos))">✏</button>
+                                                </td>
+                                            </tr>
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Render standalone positions (no group)
+                            foreach (var pos in standalone)
+                            {
+                                var cache  = GetCache(pos.Symbol);
+                                var price  = cache?.LastPrice;
+                                var mult   = pos.AssetType == AssetType.Stock ? 1m : 100m;
+                                var mktVal = price.HasValue ? price.Value * pos.Quantity * mult : (decimal?)null;
+                                var pnl    = price.HasValue ? PortfolioService.CalculateUnrealizedPnL(pos, price.Value) : (decimal?)null;
+                                var pnlPct = price.HasValue && pos.AverageCost != 0
+                                    ? (price.Value - pos.AverageCost) / pos.AverageCost * 100 : (decimal?)null;
+                                var warn   = PortfolioService.IsRuleViolation(_account, pos.AssetType, pos.Direction);
+
+                                @if (_editingId == pos.Id)
+                                {
+                                    <!-- INLINE EDIT ROW -->
+                                    <tr style="background:var(--bg-elevated)">
+                                        <td colspan="4">
+                                            <strong style="color:var(--accent)">✏ Editing: @pos.Symbol</strong>
+                                        </td>
+                                        <td class="text-right">
+                                            <input class="pm-input" style="width:80px" type="number" step="1" @bind="_editQty" />
+                                        </td>
+                                        <td class="text-right">
+                                            <input class="pm-input" style="width:100px" type="number" step="0.01" @bind="_editCost" />
+                                        </td>
+                                        <td class="text-right">
+                                            @if (pos.AssetType != AssetType.Stock)
+                                            {
+                                                <input class="pm-input" style="width:90px" type="number" step="0.01" @bind="_editStrike" />
+                                            }
+                                            else { <span style="color:var(--text-muted)">—</span> }
+                                        </td>
+                                        <td>
+                                            @if (pos.AssetType != AssetType.Stock)
+                                            {
+                                                <input class="pm-input" style="width:130px" type="date" @bind="_editExpiry" />
+                                            }
+                                            else { <span style="color:var(--text-muted)">—</span> }
+                                        </td>
+                                        <td>
+                                            <input class="pm-input" style="width:150px" type="text" @bind="_editGroup" placeholder="Spread group name" />
+                                        </td>
+                                        <td colspan="3"></td>
+                                        <td class="text-center" style="white-space:nowrap">
+                                            <button class="btn btn-success btn-sm" @onclick="@(() => SaveEditAsync(pos))">✓</button>
+                                            <button class="btn btn-secondary btn-sm" @onclick="CancelEdit">✕</button>
+                                        </td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    <tr>
+                                        <td>
+                                            @pos.Symbol
+                                            @if (warn) { <span class="badge badge-warn" title="Rule violation">⚠</span> }
+                                        </td>
+                                        <td><span class="badge @AssetBadge(pos.AssetType)">@pos.AssetType</span></td>
+                                        <td><span class="badge @DirBadge(pos.Direction)">@pos.Direction</span></td>
+                                        <td>@pos.Exchange</td>
+                                        <td class="text-right">@pos.Quantity</td>
+                                        <td class="text-right">@pos.AverageCost.ToString("F2")</td>
+                                        <td class="text-right">@(pos.StrikePrice?.ToString("F2") ?? "—")</td>
+                                        <td>@(pos.ExpiryDate?.ToString("MMM dd ''yy") ?? "—")</td>
+                                        <td class="text-right">@(price?.ToString("F2") ?? "—")</td>
+                                        <td class="text-right">@(mktVal?.ToString("F2") ?? "—")</td>
+                                        <td class="text-right @PnlClass(pnl)">@(pnl?.ToString("+0.00;-0.00;0.00") ?? "—")</td>
+                                        <td class="text-right @PnlClass(pnlPct)">@(pnlPct != null ? pnlPct.Value.ToString("+0.00;-0.00;0.00") + "%" : "—")</td>
+                                        <td class="text-center">
+                                            <button class="btn btn-secondary btn-sm" @onclick="@(() => StartEdit(pos))">✏</button>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public int AccountId { get; set; }
+
+    private Account? _account;
+    private List<Position> _positions = [];
+    private Dictionary<string, PriceCache> _priceCache = [];
+    private decimal _editCashCAD;
+    private decimal _editCashUSD;
+    private bool _cashSaved;
+
+    // Inline edit state
+    private int? _editingId;
+    private decimal _editQty;
+    private decimal _editCost;
+    private decimal? _editStrike;
+    private DateTime? _editExpiry;
+    private string? _editGroup;
+
+    // Collapsed spread groups
+    private readonly HashSet<string> _collapsedGroups = [];
+
+    private static readonly System.Globalization.CultureInfo CadCulture = new("en-CA");
+    private static readonly System.Globalization.CultureInfo UsdCulture = new("en-US");
+
+    private decimal TotalPnL => _positions
+        .Sum(p => GetCache(p.Symbol) is { } c ? PortfolioService.CalculateUnrealizedPnL(p, c.LastPrice) : 0);
+
+    protected override async Task OnInitializedAsync()
+    {
+        PriceState.OnUpdated += OnPricesUpdated;
+        await LoadAsync();
+    }
+
+    private void GoBack() => Nav.NavigateTo("/");
+    private void GoToAddPosition() => Nav.NavigateTo("/transactions?accountId=" + AccountId);
+
+    private async Task LoadAsync()
+    {
+        var accounts = await PortfolioService.GetAccountsAsync();
+        _account = accounts.FirstOrDefault(a => a.Id == AccountId);
+        if (_account is not null)
+        {
+            _positions = _account.Positions.Where(p => p.IsOpen).ToList();
+            _editCashCAD = _account.CashCAD;
+            _editCashUSD = _account.CashUSD;
+        }
+        _priceCache = await PortfolioService.GetPriceCacheAsync();
+    }
+
+    private async Task SaveCashAsync()
+    {
+        await PortfolioService.UpdateCashAsync(AccountId, _editCashCAD, _editCashUSD);
+        await LoadAsync();
+        _cashSaved = true;
+        await Task.Delay(2000);
+        _cashSaved = false;
+    }
+
+    private void StartEdit(Position pos)
+    {
+        _editingId  = pos.Id;
+        _editQty    = pos.Quantity;
+        _editCost   = pos.AverageCost;
+        _editStrike = pos.StrikePrice;
+        _editExpiry = pos.ExpiryDate;
+        _editGroup  = pos.SpreadGroupName;
+    }
+
+    private void CancelEdit() => _editingId = null;
+
+    private void ToggleGroup(string groupName)
+    {
+        if (!_collapsedGroups.Add(groupName))
+            _collapsedGroups.Remove(groupName);
+    }
+
+    private async Task SaveEditAsync(Position pos)
+    {
+        await PortfolioService.UpdatePositionAsync(pos.Id, _editQty, _editCost, _editStrike, _editExpiry, _editGroup);
+        _editingId = null;
+        await LoadAsync();
+    }
+
+    private async void OnPricesUpdated()
+    {
+        _priceCache = await PortfolioService.GetPriceCacheAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => PriceState.OnUpdated -= OnPricesUpdated;
+
+    private PriceCache? GetCache(string symbol) =>
+        _priceCache.TryGetValue(symbol, out var c) ? c : null;
+
+    private static string PnlClass(decimal? v) => v switch { > 0 => "pnl-pos", < 0 => "pnl-neg", _ => "pnl-zero" };
+
+    private static string AccountTypeBadge(AccountType t) => t switch
+    {
+        AccountType.Margin => "badge-margin",
+        AccountType.TFSA   => "badge-tfsa",
+        AccountType.RRSP   => "badge-rrsp",
+        AccountType.RESP   => "badge-resp",
+        _                  => "badge-owner"
+    };
+    private static string AssetBadge(AssetType t) => t switch
+    {
+        AssetType.CallOption => "badge-call",
+        AssetType.PutOption  => "badge-put",
+        _                    => "badge-stock"
+    };
+    private static string DirBadge(PositionDirection d) =>
+        d == PositionDirection.Long ? "badge-long" : "badge-short";
+}

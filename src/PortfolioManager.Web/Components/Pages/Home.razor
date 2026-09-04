@@ -1,0 +1,190 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@inject PortfolioService PortfolioService
+@inject PriceState PriceState
+@inject PriceRefreshService PriceRefreshService
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>Dashboard – Portfolio Manager</PageTitle>
+
+<div class="pm-page-header">
+    <div>
+        <h1>Portfolio Dashboard</h1>
+        <div class="subtitle">All accounts at a glance</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px">
+        <PriceStatusBadge />
+        <button class="btn btn-secondary btn-sm" @onclick="RefreshPricesAsync" disabled="@_refreshing">
+            @(_refreshing ? "⏳ Refreshing…" : "🔄 Refresh Prices")
+        </button>
+    </div>
+</div>
+
+@if (_accounts is null)
+{
+    <p style="color:var(--text-muted)">Loading…</p>
+}
+else
+{
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="label">Total Cash CAD</div>
+            <div class="value">@TotalCashCAD.ToString("C2", CadCulture)</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Total Cash USD</div>
+            <div class="value">@TotalCashUSD.ToString("C2", UsdCulture)</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Open Positions</div>
+            <div class="value">@TotalPositions</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Unrealized P&amp;L</div>
+            <div class="value @PnlClass(TotalPnL)">@TotalPnL.ToString("+0.00;-0.00;0.00")</div>
+        </div>
+    </div>
+
+    @foreach (var account in _accounts)
+    {
+        var positions = account.Positions.Where(p => p.IsOpen).ToList();
+        <div class="account-card">
+            <div class="account-card-header">
+                <div class="account-meta">
+                    <span class="account-name">@account.Name</span>
+                    <span class="badge @AccountTypeBadge(account.Type)">@account.Type</span>
+                    <span class="badge badge-owner">@account.Owner</span>
+                </div>
+                <div class="account-meta">
+                    <span class="account-cash">
+                        CAD <strong>@account.CashCAD.ToString("C2", CadCulture)</strong>
+                        &nbsp;|&nbsp;
+                        USD <strong>@account.CashUSD.ToString("C2", UsdCulture)</strong>
+                    </span>
+                    <button class="btn btn-secondary btn-sm" @onclick="@(() => GoToAccount(account.Id))">Details →</button>
+                </div>
+            </div>
+
+            @if (positions.Count == 0)
+            {
+                <div class="account-empty">No open positions.</div>
+            }
+            else
+            {
+                <div class="pm-table-wrap">
+                    <table class="pm-table">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Type</th>
+                                <th>Dir</th>
+                                <th class="text-right">Qty</th>
+                                <th class="text-right">Avg Cost</th>
+                                <th class="text-right">Last Price</th>
+                                <th class="text-right">Day Chg</th>
+                                <th class="text-right">P&amp;L</th>
+                                <th class="text-right">P&amp;L %</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var pos in positions)
+                            {
+                                var cache = GetCache(pos.Symbol);
+                                var price = cache?.LastPrice;
+                                var dayChg = cache != null && cache.PreviousClose != 0
+                                    ? cache.LastPrice - cache.PreviousClose : (decimal?)null;
+                                var pnl = price.HasValue ? PortfolioService.CalculateUnrealizedPnL(pos, price.Value) : (decimal?)null;
+                                var pnlPct = price.HasValue && pos.AverageCost != 0
+                                    ? (price.Value - pos.AverageCost) / pos.AverageCost * 100 : (decimal?)null;
+                                var violation = PortfolioService.IsRuleViolation(account, pos.AssetType, pos.Direction);
+                                <tr>
+                                    <td>
+                                        @pos.Symbol
+                                        @if (violation) { <span class="badge badge-warn" title="Rule violation">⚠</span> }
+                                    </td>
+                                    <td><span class="badge @AssetBadge(pos.AssetType)">@pos.AssetType</span></td>
+                                    <td><span class="badge @DirBadge(pos.Direction)">@pos.Direction</span></td>
+                                    <td class="text-right">@pos.Quantity</td>
+                                    <td class="text-right">@pos.AverageCost.ToString("F2")</td>
+                                    <td class="text-right">@(price?.ToString("F2") ?? "—")</td>
+                                    <td class="text-right @PnlClass(dayChg)">@(dayChg?.ToString("+0.00;-0.00") ?? "—")</td>
+                                    <td class="text-right @PnlClass(pnl)">@(pnl?.ToString("+0.00;-0.00;0.00") ?? "—")</td>
+                                    <td class="text-right @PnlClass(pnlPct)">@(pnlPct != null ? pnlPct.Value.ToString("+0.00;-0.00;0.00") + "%" : "—")</td>
+                                    <td><button class="btn btn-secondary btn-sm" @onclick="@(() => GoToAccount(account.Id))">→</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    private List<Account>? _accounts;
+    private Dictionary<string, PriceCache> _priceCache = [];
+    private bool _refreshing;
+
+    private static readonly System.Globalization.CultureInfo CadCulture = new("en-CA");
+    private static readonly System.Globalization.CultureInfo UsdCulture = new("en-US");
+
+    private decimal TotalCashCAD   => _accounts?.Sum(a => a.CashCAD) ?? 0;
+    private decimal TotalCashUSD   => _accounts?.Sum(a => a.CashUSD) ?? 0;
+    private int     TotalPositions => _accounts?.Sum(a => a.Positions.Count(p => p.IsOpen)) ?? 0;
+    private decimal TotalPnL       => _accounts?
+        .SelectMany(a => a.Positions.Where(p => p.IsOpen))
+        .Sum(p => GetCache(p.Symbol) is { } c ? PortfolioService.CalculateUnrealizedPnL(p, c.LastPrice) : 0) ?? 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        PriceState.OnUpdated += OnPricesUpdated;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _accounts = await PortfolioService.GetAccountsAsync();
+        _priceCache = await PortfolioService.GetPriceCacheAsync();
+    }
+
+    private async Task RefreshPricesAsync()
+    {
+        _refreshing = true;
+        await PriceRefreshService.ForceRefreshAsync();
+        _priceCache = await PortfolioService.GetPriceCacheAsync();
+        _refreshing = false;
+    }
+
+    private void GoToAccount(int id) => Nav.NavigateTo("/account/" + id);
+    private async void OnPricesUpdated()
+    {
+        _priceCache = await PortfolioService.GetPriceCacheAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+    public void Dispose() => PriceState.OnUpdated -= OnPricesUpdated;
+
+    private PriceCache? GetCache(string symbol) =>
+        _priceCache.TryGetValue(symbol, out var c) ? c : null;
+
+    private static string PnlClass(decimal? v) => v switch { > 0 => "pnl-pos", < 0 => "pnl-neg", _ => "pnl-zero" };
+    private static string AccountTypeBadge(AccountType t) => t switch
+    {
+        AccountType.Margin => "badge-margin",
+        AccountType.TFSA   => "badge-tfsa",
+        AccountType.RRSP   => "badge-rrsp",
+        AccountType.RESP   => "badge-resp",
+        _                  => "badge-owner"
+    };
+    private static string AssetBadge(AssetType t) => t switch
+    {
+        AssetType.CallOption => "badge-call",
+        AssetType.PutOption  => "badge-put",
+        _                    => "badge-stock"
+    };
+    private static string DirBadge(PositionDirection d) =>
+        d == PositionDirection.Long ? "badge-long" : "badge-short";
+}
+

@@ -1,0 +1,29 @@
+# Visual Studio artifacts
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build outputs
+**/bin/
+**/obj/
+
+# ASP.NET Core
+**/wwwroot/lib/
+
+# SQLite database (contains real portfolio data — never commit)
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets
+appsettings.*.local.json
+secrets.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Rider
+.idea/

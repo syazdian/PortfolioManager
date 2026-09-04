@@ -1,0 +1,329 @@
+@page "/manage"
+@rendermode InteractiveServer
+@inject PortfolioService PortfolioService
+@inject PriceState PriceState
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>Manage Data – Portfolio Manager</PageTitle>
+
+<div class="pm-page-header">
+    <div>
+        <h1>Manage Data</h1>
+        <div class="subtitle">Edit or delete positions and transactions</div>
+    </div>
+    <button class="btn btn-secondary" @onclick="GoBack">← Dashboard</button>
+</div>
+
+@if (_accounts is null)
+{
+    <p style="color:var(--text-muted)">Loading…</p>
+}
+else
+{
+    <!-- Account selector -->
+    <div class="pm-panel" style="max-width:400px;margin-bottom:24px">
+        <div class="pm-panel-header">Select Account</div>
+        <div class="pm-panel-body">
+            <div class="pm-field">
+                <label class="pm-label">Account</label>
+                <select class="pm-select" @onchange="OnAccountChanged">
+                    <option value="0">— choose —</option>
+                    @foreach (var a in _accounts)
+                    {
+                        <option value="@a.Id">@a.Name (@a.Type – @a.Owner)</option>
+                    }
+                </select>
+            </div>
+        </div>
+    </div>
+
+    @if (_selectedAccount is not null)
+    {
+        <!-- ── Positions ── -->
+        <div class="pm-panel">
+            <div class="pm-panel-header">
+                Open Positions — @_selectedAccount.Name
+            </div>
+            @if (_positions.Count == 0)
+            {
+                <div style="padding:16px;color:var(--text-muted);font-style:italic">No open positions.</div>
+            }
+            else
+            {
+                <div class="pm-table-wrap">
+                    <table class="pm-table">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Type</th>
+                                <th>Dir</th>
+                                <th class="text-right">Qty</th>
+                                <th class="text-right">Avg Cost</th>
+                                <th class="text-right">Strike</th>
+                                <th>Expiry</th>
+                                <th class="text-right">Last Price</th>
+                                <th class="text-right">P&amp;L</th>
+                                <th class="text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var pos in _positions)
+                            {
+                                @if (_editingPositionId == pos.Id)
+                                {
+                                    <tr style="background:var(--bg-elevated)">
+                                        <td colspan="5">
+                                            <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;padding:4px 0">
+                                                <div class="pm-field">
+                                                    <label class="pm-label">Qty</label>
+                                                    <input class="pm-input" style="width:90px" type="number" step="1" @bind="_editQty" />
+                                                </div>
+                                                <div class="pm-field">
+                                                    <label class="pm-label">Avg Cost</label>
+                                                    <input class="pm-input" style="width:110px" type="number" step="0.01" @bind="_editAvgCost" />
+                                                </div>
+                                                @if (pos.AssetType != AssetType.Stock)
+                                                {
+                                                    <div class="pm-field">
+                                                        <label class="pm-label">Strike</label>
+                                                        <input class="pm-input" style="width:100px" type="number" step="0.01" @bind="_editStrike" />
+                                                    </div>
+                                                    <div class="pm-field">
+                                                        <label class="pm-label">Expiry</label>
+                                                        <input class="pm-input" style="width:140px" type="date" @bind="_editExpiry" />
+                                                    </div>
+                                                }
+                                                <button class="btn btn-success btn-sm" @onclick="@(() => SavePositionAsync(pos))">✓ Save</button>
+                                                <button class="btn btn-secondary btn-sm" @onclick="CancelEdit">✕ Cancel</button>
+                                            </div>
+                                        </td>
+                                        <td></td><td></td><td></td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    <tr>
+                                        <td><strong>@pos.Symbol</strong></td>
+                                        <td><span class="badge @AssetBadge(pos.AssetType)">@pos.AssetType</span></td>
+                                        <td><span class="badge @DirBadge(pos.Direction)">@pos.Direction</span></td>
+                                        <td class="text-right">@pos.Quantity</td>
+                                        <td class="text-right">@pos.AverageCost.ToString("F2")</td>
+                                        <td class="text-right">@(pos.StrikePrice?.ToString("F2") ?? "—")</td>
+                                        <td>@(pos.ExpiryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                                        <td class="text-right">@(GetPrice(pos.Symbol)?.ToString("F2") ?? "—")</td>
+                                        <td class="text-right @PnlClass(GetPnl(pos))">@(GetPnl(pos)?.ToString("+0.00;-0.00;0.00") ?? "—")</td>
+                                        <td class="text-center">
+                                            <button class="btn btn-secondary btn-sm" @onclick="@(() => StartEditPosition(pos))">✏ Edit</button>
+                                            <button class="btn btn-danger btn-sm" @onclick="@(() => ConfirmDeletePosition(pos.Id))">🗑 Delete</button>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+
+        <!-- ── Transactions ── -->
+        <div class="pm-panel">
+            <div class="pm-panel-header">Transaction History — @_selectedAccount.Name</div>
+            @if (_transactions.Count == 0)
+            {
+                <div style="padding:16px;color:var(--text-muted);font-style:italic">No transactions.</div>
+            }
+            else
+            {
+                <div class="pm-table-wrap">
+                    <table class="pm-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Action</th>
+                                <th>Symbol</th>
+                                <th class="text-right">Qty</th>
+                                <th class="text-right">Price</th>
+                                <th>Currency</th>
+                                <th>Notes</th>
+                                <th class="text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var tx in _transactions)
+                            {
+                                <tr>
+                                    <td>@tx.Date.ToString("yyyy-MM-dd")</td>
+                                    <td><span class="badge badge-owner">@tx.Action</span></td>
+                                    <td>@(tx.Position?.Symbol ?? "—")</td>
+                                    <td class="text-right">@tx.Quantity</td>
+                                    <td class="text-right">@tx.Price.ToString("F2")</td>
+                                    <td>@tx.Currency</td>
+                                    <td style="color:var(--text-muted)">@(tx.Notes ?? "")</td>
+                                    <td class="text-center">
+                                        <button class="btn btn-danger btn-sm" @onclick="@(() => ConfirmDeleteTransaction(tx.Id))">🗑 Delete</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+}
+
+<!-- Confirm Dialog -->
+@if (_confirmMessage is not null)
+{
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:500">
+        <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:28px;max-width:380px;width:90%">
+            <div style="font-size:1rem;font-weight:700;margin-bottom:12px">Confirm Delete</div>
+            <div style="color:var(--text-muted);margin-bottom:20px">@_confirmMessage</div>
+            <div style="display:flex;gap:10px">
+                <button class="btn btn-danger" @onclick="ExecuteConfirmedDeleteAsync">🗑 Yes, Delete</button>
+                <button class="btn btn-secondary" @onclick="CancelConfirm">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(_statusMsg))
+{
+    <div class="pm-alert pm-alert-success" style="position:fixed;bottom:20px;right:20px;min-width:220px">@_statusMsg</div>
+}
+
+@code {
+    private List<Account>? _accounts;
+    private Account? _selectedAccount;
+    private List<Position> _positions = [];
+    private List<Transaction> _transactions = [];
+    private Dictionary<string, PriceCache> _priceCache = [];
+
+    private int? _editingPositionId;
+    private decimal _editQty;
+    private decimal _editAvgCost;
+    private decimal? _editStrike;
+    private DateTime? _editExpiry;
+
+    private string? _confirmMessage;
+    private Func<Task>? _confirmAction;
+    private string? _statusMsg;
+
+    protected override async Task OnInitializedAsync()
+    {
+        PriceState.OnUpdated += OnPricesUpdated;
+        _accounts = await PortfolioService.GetAccountsAsync();
+        _priceCache = await PortfolioService.GetPriceCacheAsync();
+    }
+
+    public void Dispose() => PriceState.OnUpdated -= OnPricesUpdated;
+
+    private async void OnPricesUpdated()
+    {
+        _priceCache = await PortfolioService.GetPriceCacheAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnAccountChanged(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var id) || id == 0)
+        {
+            _selectedAccount = null;
+            _positions = [];
+            _transactions = [];
+            return;
+        }
+        _selectedAccount = _accounts!.First(a => a.Id == id);
+        await LoadAccountDataAsync(id);
+    }
+
+    private async Task LoadAccountDataAsync(int accountId)
+    {
+        _positions = await PortfolioService.GetOpenPositionsAsync(accountId);
+        _transactions = await PortfolioService.GetTransactionsAsync(accountId);
+        _priceCache = await PortfolioService.GetPriceCacheAsync();
+    }
+
+    private decimal? GetPrice(string symbol) =>
+        _priceCache.TryGetValue(symbol, out var c) ? c.LastPrice : null;
+
+    private decimal? GetPnl(Position pos) =>
+        _priceCache.TryGetValue(pos.Symbol, out var c)
+            ? PortfolioService.CalculateUnrealizedPnL(pos, c.LastPrice) : null;
+
+    private static string PnlClass(decimal? v) => v switch { > 0 => "pnl-pos", < 0 => "pnl-neg", _ => "pnl-zero" };
+
+    private void StartEditPosition(Position pos)
+    {
+        _editingPositionId = pos.Id;
+        _editQty = pos.Quantity;
+        _editAvgCost = pos.AverageCost;
+        _editStrike = pos.StrikePrice;
+        _editExpiry = pos.ExpiryDate;
+    }
+
+    private void CancelEdit() => _editingPositionId = null;
+
+    private async Task SavePositionAsync(Position pos)
+    {
+        await PortfolioService.UpdatePositionAsync(pos.Id, _editQty, _editAvgCost, _editStrike, _editExpiry, pos.SpreadGroupName);
+        _editingPositionId = null;
+        await LoadAccountDataAsync(_selectedAccount!.Id);
+        await ShowStatus("Position updated.");
+    }
+
+    private void ConfirmDeletePosition(int positionId)
+    {
+        _confirmMessage = "Delete this position and all its transactions? This cannot be undone.";
+        _confirmAction = async () =>
+        {
+            await PortfolioService.DeletePositionAsync(positionId);
+            await LoadAccountDataAsync(_selectedAccount!.Id);
+            await ShowStatus("Position deleted.");
+        };
+    }
+
+    private void ConfirmDeleteTransaction(int txId)
+    {
+        _confirmMessage = "Delete this transaction record?";
+        _confirmAction = async () =>
+        {
+            await PortfolioService.DeleteTransactionAsync(txId);
+            await LoadAccountDataAsync(_selectedAccount!.Id);
+            await ShowStatus("Transaction deleted.");
+        };
+    }
+
+    private async Task ExecuteConfirmedDeleteAsync()
+    {
+        if (_confirmAction is not null) await _confirmAction();
+        _confirmMessage = null;
+        _confirmAction = null;
+    }
+
+    private void CancelConfirm()
+    {
+        _confirmMessage = null;
+        _confirmAction = null;
+    }
+
+    private async Task ShowStatus(string msg)
+    {
+        _statusMsg = msg;
+        StateHasChanged();
+        await Task.Delay(2500);
+        _statusMsg = null;
+    }
+
+    private void GoBack() => Nav.NavigateTo("/");
+
+    private static string AssetBadge(AssetType t) => t switch
+    {
+        AssetType.CallOption => "badge-call",
+        AssetType.PutOption  => "badge-put",
+        _                    => "badge-stock"
+    };
+    private static string DirBadge(PositionDirection d) =>
+        d == PositionDirection.Long ? "badge-long" : "badge-short";
+}

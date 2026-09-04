@@ -1,0 +1,14 @@
+@inject PriceState PriceState
+@implements IDisposable
+
+<div class="price-status text-muted small">
+    🕐 Prices: <strong>@PriceState.LastUpdatedLabel</strong>
+</div>
+
+@code {
+    protected override void OnInitialized()
+        => PriceState.OnUpdated += StateHasChanged;
+
+    public void Dispose()
+        => PriceState.OnUpdated -= StateHasChanged;
+}

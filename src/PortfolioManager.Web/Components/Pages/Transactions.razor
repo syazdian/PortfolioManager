@@ -1,0 +1,202 @@
+@page "/transactions"
+@rendermode InteractiveServer
+@inject PortfolioService PortfolioService
+@inject NavigationManager Nav
+
+<PageTitle>Log Trade – Portfolio Manager</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Log Trade / Position</h2>
+    <button class="btn btn-outline-secondary" @onclick="GoBack">← Dashboard</button>
+</div>
+
+<div class="card border-secondary" style="max-width:640px">
+    <div class="card-body">
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="alert alert-danger">@_error</div>
+        }
+        @if (_saved)
+        {
+            <div class="alert alert-success">✓ Position saved successfully.</div>
+        }
+
+        <div class="mb-3">
+            <label class="form-label">Account</label>
+            <select class="form-select bg-dark text-white border-secondary" @bind="_accountId">
+                <option value="0">— select —</option>
+                @foreach (var a in _accounts)
+                {
+                    <option value="@a.Id">@a.Name (@a.Type – @a.Owner)</option>
+                }
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Symbol <span class="text-muted small">(e.g. AAPL, XIU.TO)</span></label>
+            <input class="form-control bg-dark text-white border-secondary" @bind="_symbol" placeholder="AAPL" />
+        </div>
+
+        <div class="row mb-3">
+            <div class="col">
+                <label class="form-label">Asset Type</label>
+                <select class="form-select bg-dark text-white border-secondary" @bind="_assetType">
+                    @foreach (var t in Enum.GetValues<AssetType>())
+                    {
+                        <option value="@t">@t</option>
+                    }
+                </select>
+            </div>
+            <div class="col">
+                <label class="form-label">Direction</label>
+                <select class="form-select bg-dark text-white border-secondary" @bind="_direction">
+                    <option value="@PositionDirection.Long">Long (Buy)</option>
+                    <option value="@PositionDirection.Short">Short (Write/Sell)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="row mb-3">
+            <div class="col">
+                <label class="form-label">Exchange</label>
+                <select class="form-select bg-dark text-white border-secondary" @bind="_exchange">
+                    <option value="@Exchange.US">US (NYSE/NASDAQ)</option>
+                    <option value="@Exchange.CA">CA (TSX)</option>
+                </select>
+            </div>
+            <div class="col">
+                <label class="form-label">Currency</label>
+                <select class="form-select bg-dark text-white border-secondary" @bind="_currency">
+                    <option value="@Currency.USD">USD</option>
+                    <option value="@Currency.CAD">CAD</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="row mb-3">
+            <div class="col">
+                <label class="form-label">
+                    Quantity
+                    @if (_assetType != AssetType.Stock)
+                    {
+                        <span class="text-muted small">(contracts)</span>
+                    }
+                </label>
+                <input type="number" class="form-control bg-dark text-white border-secondary"
+                       @bind="_quantity" step="1" min="0" />
+            </div>
+            <div class="col">
+                <label class="form-label">Price per share / contract</label>
+                <input type="number" class="form-control bg-dark text-white border-secondary"
+                       @bind="_price" step="0.01" min="0" />
+            </div>
+        </div>
+
+        @if (_assetType != AssetType.Stock)
+        {
+            <div class="row mb-3">
+                <div class="col">
+                    <label class="form-label">Strike Price</label>
+                    <input type="number" class="form-control bg-dark text-white border-secondary"
+                           @bind="_strikePrice" step="0.01" min="0" />
+                </div>
+                <div class="col">
+                    <label class="form-label">Expiry Date</label>
+                    <input type="date" class="form-control bg-dark text-white border-secondary"
+                           @bind="_expiryDate" />
+                </div>
+            </div>
+        }
+
+        <div class="mb-3">
+            <label class="form-label">Trade Date</label>
+            <input type="date" class="form-control bg-dark text-white border-secondary" @bind="_date" />
+        </div>
+
+        @if (_ruleWarning is not null)
+        {
+            <div class="alert alert-warning">⚠ @_ruleWarning</div>
+        }
+
+        <button class="btn btn-primary" @onclick="SubmitAsync" disabled="@_submitting">
+            @(_submitting ? "Saving…" : "Save Position")
+        </button>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery] public int? AccountId { get; set; }
+
+    private List<Account> _accounts = [];
+    private int _accountId;
+    private string _symbol = string.Empty;
+    private AssetType _assetType = AssetType.Stock;
+    private PositionDirection _direction = PositionDirection.Long;
+    private Exchange _exchange = Exchange.US;
+    private Currency _currency = Currency.USD;
+    private decimal _quantity;
+    private decimal _price;
+    private decimal? _strikePrice;
+    private DateTime? _expiryDate;
+    private DateTime _date = DateTime.Today;
+    private string? _error;
+    private string? _ruleWarning;
+    private bool _saved;
+    private bool _submitting;
+
+    private void GoBack() => Nav.NavigateTo("/");
+
+    protected override async Task OnInitializedAsync()
+    {
+        _accounts = await PortfolioService.GetAccountsAsync();
+        if (AccountId.HasValue) _accountId = AccountId.Value;
+    }
+
+    private void CheckRule()
+    {
+        _ruleWarning = null;
+        if (_accountId == 0) return;
+        var account = _accounts.FirstOrDefault(a => a.Id == _accountId);
+        if (account is not null && PortfolioService.IsRuleViolation(account, _assetType, _direction))
+            _ruleWarning = $"Writing put options is NOT allowed in a {account.Type} account. Only Margin accounts can write puts.";
+    }
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+        _saved = false;
+        CheckRule();
+
+        if (_accountId == 0) { _error = "Please select an account."; return; }
+        if (string.IsNullOrWhiteSpace(_symbol)) { _error = "Symbol is required."; return; }
+        if (_quantity <= 0) { _error = "Quantity must be greater than 0."; return; }
+        if (_price <= 0) { _error = "Price must be greater than 0."; return; }
+
+        _submitting = true;
+        try
+        {
+            await PortfolioService.AddOrUpdatePositionAsync(
+                _accountId, _symbol.ToUpperInvariant().Trim(),
+                _assetType, _direction, _exchange, _currency,
+                _quantity, _price, _date,
+                _assetType != AssetType.Stock ? _strikePrice : null,
+                _assetType != AssetType.Stock ? _expiryDate : null);
+
+            _saved = true;
+            _symbol = string.Empty;
+            _quantity = 0;
+            _price = 0;
+            _strikePrice = null;
+            _expiryDate = null;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+}
