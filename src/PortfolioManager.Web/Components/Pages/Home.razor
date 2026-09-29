@@ -85,6 +85,12 @@ else
             }
             else
             {
+                var standalonePositions = positions.Where(p => string.IsNullOrEmpty(p.SpreadGroupName)).ToList();
+                var spreadGroups = positions
+                    .Where(p => !string.IsNullOrEmpty(p.SpreadGroupName))
+                    .GroupBy(p => p.SpreadGroupName!)
+                    .ToList();
+
                 <div class="pm-table-wrap">
                     <table class="pm-table">
                         <thead>
@@ -102,7 +108,57 @@ else
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var pos in positions)
+                            @foreach (var group in spreadGroups)
+                            {
+                                var legs = group.ToList();
+                                var combinedPnl = legs.Sum(p =>
+                                {
+                                    var c = GetCache(p.Symbol);
+                                    return c != null ? PortfolioService.CalculateUnrealizedPnL(p, c.LastPrice) : 0m;
+                                });
+                                var allHavePrice = legs.All(p => GetCache(p.Symbol) != null);
+                                <tr class="spread-group-header">
+                                    <td colspan="7">
+                                        📦 <strong>@group.Key</strong>
+                                        <span class="badge badge-spread" style="margin-left:6px">SPREAD</span>
+                                        <span style="color:var(--text-muted);font-size:0.78rem;margin-left:8px;font-weight:400">@legs.Count legs</span>
+                                    </td>
+                                    <td class="text-right @PnlClass(allHavePrice ? combinedPnl : (decimal?)null)">
+                                        @(allHavePrice ? combinedPnl.ToString("+0.00;-0.00;0.00") : "—")
+                                    </td>
+                                    <td></td>
+                                    <td></td>
+                                </tr>
+                                @for (int li = 0; li < legs.Count; li++)
+                                {
+                                    var pos = legs[li];
+                                    var isLast = li == legs.Count - 1;
+                                    var cache = GetCache(pos.Symbol);
+                                    var price = cache?.LastPrice;
+                                    var dayChg = cache != null && cache.PreviousClose != 0
+                                        ? cache.LastPrice - cache.PreviousClose : (decimal?)null;
+                                    var pnl = price.HasValue ? PortfolioService.CalculateUnrealizedPnL(pos, price.Value) : (decimal?)null;
+                                    var pnlPct = price.HasValue && pos.AverageCost != 0
+                                        ? (price.Value - pos.AverageCost) / pos.AverageCost * 100 : (decimal?)null;
+                                    var violation = PortfolioService.IsRuleViolation(account, pos.AssetType, pos.Direction);
+                                    <tr class="spread-leg @(isLast ? "spread-leg-last" : "")">
+                                        <td>
+                                            @pos.Symbol
+                                            @if (violation) { <span class="badge badge-warn" title="Rule violation">⚠</span> }
+                                        </td>
+                                        <td><span class="badge @AssetBadge(pos.AssetType)">@pos.AssetType</span></td>
+                                        <td><span class="badge @DirBadge(pos.Direction)">@pos.Direction</span></td>
+                                        <td class="text-right">@pos.Quantity</td>
+                                        <td class="text-right">@pos.AverageCost.ToString("F2")</td>
+                                        <td class="text-right">@(price?.ToString("F2") ?? "—")</td>
+                                        <td class="text-right @PnlClass(dayChg)">@(dayChg?.ToString("+0.00;-0.00") ?? "—")</td>
+                                        <td class="text-right @PnlClass(pnl)">@(pnl?.ToString("+0.00;-0.00;0.00") ?? "—")</td>
+                                        <td class="text-right @PnlClass(pnlPct)">@(pnlPct != null ? pnlPct.Value.ToString("+0.00;-0.00;0.00") + "%" : "—")</td>
+                                        <td><button class="btn btn-secondary btn-sm" @onclick="@(() => GoToAccount(account.Id))">→</button></td>
+                                    </tr>
+                                }
+                            }
+                            @foreach (var pos in standalonePositions)
                             {
                                 var cache = GetCache(pos.Symbol);
                                 var price = cache?.LastPrice;

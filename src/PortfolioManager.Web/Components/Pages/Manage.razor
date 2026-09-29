@@ -94,6 +94,10 @@ else
                                                         <input class="pm-input" style="width:140px" type="date" @bind="_editExpiry" />
                                                     </div>
                                                 }
+                                                <div class="pm-field">
+                                                    <label class="pm-label">Spread Group</label>
+                                                    <input class="pm-input" style="width:160px" type="text" @bind="_editSpreadGroup" placeholder="e.g. MRVL Bull Put" />
+                                                </div>
                                                 <button class="btn btn-success btn-sm" @onclick="@(() => SavePositionAsync(pos))">✓ Save</button>
                                                 <button class="btn btn-secondary btn-sm" @onclick="CancelEdit">✕ Cancel</button>
                                             </div>
@@ -205,6 +209,7 @@ else
     private decimal _editAvgCost;
     private decimal? _editStrike;
     private DateTime? _editExpiry;
+    private string? _editSpreadGroup;
 
     private string? _confirmMessage;
     private Func<Task>? _confirmAction;
@@ -261,13 +266,14 @@ else
         _editAvgCost = pos.AverageCost;
         _editStrike = pos.StrikePrice;
         _editExpiry = pos.ExpiryDate;
+        _editSpreadGroup = pos.SpreadGroupName;
     }
 
     private void CancelEdit() => _editingPositionId = null;
 
     private async Task SavePositionAsync(Position pos)
     {
-        await PortfolioService.UpdatePositionAsync(pos.Id, _editQty, _editAvgCost, _editStrike, _editExpiry, pos.SpreadGroupName);
+        await PortfolioService.UpdatePositionAsync(pos.Id, _editQty, _editAvgCost, _editStrike, _editExpiry, string.IsNullOrWhiteSpace(_editSpreadGroup) ? null : _editSpreadGroup.Trim());
         _editingPositionId = null;
         await LoadAccountDataAsync(_selectedAccount!.Id);
         await ShowStatus("Position updated.");

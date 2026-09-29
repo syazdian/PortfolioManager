@@ -408,15 +408,39 @@ a:hover { color: var(--accent-hover); }
 .price-status { color: var(--text-muted); font-size: 0.78rem; }
 .price-status strong { color: var(--cyan); }
 
-/* ── Spread Group Rows ─────────────────────────────────────────────────── */
+/* ── Spread Group (Package Box) ─────────────────────────────────────────────── */
 .spread-group-header td {
-    background: var(--bg-elevated);
-    border-top: 2px solid var(--border);
-    font-size: 0.9rem;
-    user-select: none;
+    background: rgba(47,129,247,0.10);
+    border-top: 2px solid rgba(47,129,247,0.4);
+    border-bottom: none !important;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: var(--text-primary);
 }
-.spread-group-header:hover td { background: var(--bg-hover); }
-.spread-leg td { padding-left: 0; opacity: 0.92; }
+.spread-group-header td:first-child {
+    border-left: 3px solid var(--accent);
+}
+.spread-group-header:hover td { background: rgba(47,129,247,0.16); }
+
+.spread-leg td {
+    background: rgba(47,129,247,0.03);
+    border-bottom: 1px solid rgba(48,54,61,0.6) !important;
+    font-size: 0.81rem;
+    opacity: 0.95;
+}
+.spread-leg td:first-child {
+    border-left: 3px solid rgba(47,129,247,0.25);
+    padding-left: 26px;
+}
+.spread-leg-last td {
+    border-bottom: 2px solid rgba(47,129,247,0.3) !important;
+}
+
+.badge-spread {
+    background: rgba(47,129,247,0.2);
+    color: #2f81f7;
+    border: 1px solid #2f81f7;
+}
 
 /* ── Modal ─────────────────────────────────────────────────────────────── */
 .pm-modal-backdrop {
