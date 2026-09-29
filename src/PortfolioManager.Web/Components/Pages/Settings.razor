@@ -43,6 +43,14 @@
                     <label class="pm-label">Owner</label>
                     <input class="pm-input" style="width:140px" @bind="_newOwner" placeholder="e.g. Primary" />
                 </div>
+                <div class="pm-field">
+                    <label class="pm-label">Broker</label>
+                    <input class="pm-input" style="width:130px" @bind="_newBrokerName" placeholder="e.g. IBroker" />
+                </div>
+                <div class="pm-field">
+                    <label class="pm-label">Broker Acct ID</label>
+                    <input class="pm-input" style="width:140px" @bind="_newBrokerAccountId" placeholder="e.g. U1234567" />
+                </div>
                 <button class="btn btn-primary btn-sm" @onclick="SaveAddAsync">Save</button>
                 <button class="btn btn-secondary btn-sm" @onclick="CancelAdd">Cancel</button>
             </div>
@@ -60,11 +68,13 @@
                 <thead>
                     <tr>
                         <th>Name</th>
-                        <th>Type</th>
-                        <th>Owner</th>
-                        <th class="text-right">Cash CAD</th>
-                        <th class="text-right">Cash USD</th>
-                        <th class="text-center">Actions</th>
+                                <th>Type</th>
+                                <th>Owner</th>
+                                <th>Broker</th>
+                                <th>Broker Acct ID</th>
+                                <th class="text-right">Cash CAD</th>
+                                <th class="text-right">Cash USD</th>
+                                <th class="text-center">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -87,6 +97,12 @@
                                 <td>
                                     <input class="pm-input" style="width:140px" @bind="_editOwner" />
                                 </td>
+                                <td>
+                                    <input class="pm-input" style="width:130px" @bind="_editBrokerName" placeholder="e.g. IBroker" />
+                                </td>
+                                <td>
+                                    <input class="pm-input" style="width:140px" @bind="_editBrokerAccountId" placeholder="e.g. U1234567" />
+                                </td>
                                 <td class="text-right" style="color:var(--text-muted)">@acct.CashCAD.ToString("C2")</td>
                                 <td class="text-right" style="color:var(--text-muted)">@acct.CashUSD.ToString("C2")</td>
                                 <td class="text-center" style="white-space:nowrap">
@@ -101,6 +117,8 @@
                                 <td><strong>@acct.Name</strong></td>
                                 <td><span class="badge @AccountTypeBadge(acct.Type)">@acct.Type</span></td>
                                 <td>@acct.Owner</td>
+                                <td>@(string.IsNullOrEmpty(acct.BrokerName) ? "—" : acct.BrokerName)</td>
+                                <td style="color:var(--text-muted)">@(string.IsNullOrEmpty(acct.BrokerAccountId) ? "—" : acct.BrokerAccountId)</td>
                                 <td class="text-right">@acct.CashCAD.ToString("C2")</td>
                                 <td class="text-right">@acct.CashUSD.ToString("C2")</td>
                                 <td class="text-center" style="white-space:nowrap">
@@ -143,12 +161,16 @@
     string _newName = "";
     AccountType _newType = AccountType.TFSA;
     string _newOwner = "";
+    string _newBrokerName = "";
+    string _newBrokerAccountId = "";
 
     // Edit
     int? _editingId;
     string _editName = "";
     AccountType _editType;
     string _editOwner = "";
+    string _editBrokerName = "";
+    string _editBrokerAccountId = "";
 
     // Delete
     Account? _deleteTarget;
@@ -166,6 +188,8 @@
         _newName = "";
         _newOwner = "";
         _newType = AccountType.TFSA;
+        _newBrokerName = "";
+        _newBrokerAccountId = "";
         _error = null;
     }
 
@@ -185,8 +209,9 @@
         }
         try
         {
-            await PortfolioService.AddAccountAsync(_newName.Trim(), _newType, _newOwner.Trim());
-            _showAddForm = false;
+            await PortfolioService.AddAccountAsync(_newName.Trim(), _newType, _newOwner.Trim(),
+                    _newBrokerName.Trim(), _newBrokerAccountId.Trim());
+                _showAddForm = false;
             await LoadAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -198,6 +223,8 @@
         _editName = acct.Name;
         _editType = acct.Type;
         _editOwner = acct.Owner;
+        _editBrokerName = acct.BrokerName;
+        _editBrokerAccountId = acct.BrokerAccountId;
         _error = null;
     }
 
@@ -217,7 +244,8 @@
         }
         try
         {
-            await PortfolioService.UpdateAccountAsync(accountId, _editName.Trim(), _editType, _editOwner.Trim());
+            await PortfolioService.UpdateAccountAsync(accountId, _editName.Trim(), _editType, _editOwner.Trim(),
+                _editBrokerName.Trim(), _editBrokerAccountId.Trim());
             _editingId = null;
             await LoadAsync();
         }

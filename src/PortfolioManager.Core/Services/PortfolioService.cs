@@ -24,16 +24,22 @@ public class PortfolioService(IDbContextFactory<AppDbContext> dbFactory)
         await db.SaveChangesAsync();
     }
 
-    public async Task<Account> AddAccountAsync(string name, AccountType type, string owner)
+    public async Task<Account> AddAccountAsync(string name, AccountType type, string owner,
+        string brokerName = "", string brokerAccountId = "")
     {
         await using var db = await dbFactory.CreateDbContextAsync();
-        var account = new Account { Name = name, Type = type, Owner = owner };
+        var account = new Account
+        {
+            Name = name, Type = type, Owner = owner,
+            BrokerName = brokerName, BrokerAccountId = brokerAccountId
+        };
         db.Accounts.Add(account);
         await db.SaveChangesAsync();
         return account;
     }
 
-    public async Task UpdateAccountAsync(int accountId, string name, AccountType type, string owner)
+    public async Task UpdateAccountAsync(int accountId, string name, AccountType type, string owner,
+        string brokerName = "", string brokerAccountId = "")
     {
         await using var db = await dbFactory.CreateDbContextAsync();
         var account = await db.Accounts.FindAsync(accountId)
@@ -41,6 +47,8 @@ public class PortfolioService(IDbContextFactory<AppDbContext> dbFactory)
         account.Name = name;
         account.Type = type;
         account.Owner = owner;
+        account.BrokerName = brokerName;
+        account.BrokerAccountId = brokerAccountId;
         await db.SaveChangesAsync();
     }
 

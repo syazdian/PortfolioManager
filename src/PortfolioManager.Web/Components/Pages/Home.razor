@@ -3,6 +3,7 @@
 @inject PortfolioService PortfolioService
 @inject PriceState PriceState
 @inject PriceRefreshService PriceRefreshService
+@inject BrokerSyncService BrokerSyncService
 @inject NavigationManager Nav
 @implements IDisposable
 
@@ -62,6 +63,18 @@ else
                         &nbsp;|&nbsp;
                         USD <strong>@account.CashUSD.ToString("C2", UsdCulture)</strong>
                     </span>
+                    @if (!string.IsNullOrEmpty(account.BrokerName))
+                    {
+                        var isSyncing = _syncingAccounts.ContainsKey(account.Id) && _syncingAccounts[account.Id];
+                        var syncError = _syncErrors.GetValueOrDefault(account.Id);
+                        <button class="btn btn-primary btn-sm" @onclick="@(() => SyncAccountAsync(account))" disabled="@isSyncing">
+                            @(isSyncing ? "⏳ Syncing…" : $"🔄 Sync {account.BrokerName}")
+                        </button>
+                        @if (syncError is not null)
+                        {
+                            <span style="color:var(--red);font-size:0.8rem" title="@syncError">⚠ Sync failed</span>
+                        }
+                    }
                     <button class="btn btn-secondary btn-sm" @onclick="@(() => GoToAccount(account.Id))">Details →</button>
                 </div>
             </div>
@@ -127,6 +140,8 @@ else
     private List<Account>? _accounts;
     private Dictionary<string, PriceCache> _priceCache = [];
     private bool _refreshing;
+    private Dictionary<int, bool> _syncingAccounts = [];
+    private Dictionary<int, string?> _syncErrors = [];
 
     private static readonly System.Globalization.CultureInfo CadCulture = new("en-CA");
     private static readonly System.Globalization.CultureInfo UsdCulture = new("en-US");
@@ -159,6 +174,30 @@ else
     }
 
     private void GoToAccount(int id) => Nav.NavigateTo("/account/" + id);
+
+    private async Task SyncAccountAsync(Account account)
+    {
+        _syncingAccounts[account.Id] = true;
+        _syncErrors.Remove(account.Id);
+        StateHasChanged();
+        try
+        {
+            var result = await BrokerSyncService.SyncAccountAsync(account);
+            if (!result.Success)
+                _syncErrors[account.Id] = result.Message ?? "Sync failed.";
+            else
+                await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _syncErrors[account.Id] = ex.Message;
+        }
+        finally
+        {
+            _syncingAccounts[account.Id] = false;
+            StateHasChanged();
+        }
+    }
     private async void OnPricesUpdated()
     {
         _priceCache = await PortfolioService.GetPriceCacheAsync();

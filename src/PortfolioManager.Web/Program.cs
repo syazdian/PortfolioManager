@@ -19,6 +19,10 @@ builder.Services.AddDbContextFactory<AppDbContext>(options =>
 
 // ── Business Logic ────────────────────────────────────────────────────────────
 builder.Services.AddScoped<PortfolioService>();
+builder.Services.AddScoped<BrokerSyncService>();
+// Register IBrokerSyncClient implementations here when ready, e.g.:
+// builder.Services.AddScoped<IBrokerSyncClient, IBrokerClient>();
+// builder.Services.AddScoped<IBrokerSyncClient, QuestradeClient>();
 
 // ── Price Feed ────────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<PriceState>();
@@ -40,6 +44,20 @@ using (var scope = app.Services.CreateScope())
     {
         await db.Database.ExecuteSqlRawAsync(
             "ALTER TABLE Positions ADD COLUMN SpreadGroupName TEXT NULL");
+    }
+    catch { /* column already exists */ }
+
+    // Safe schema migration: add broker columns to Accounts if they don't exist yet
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(
+            "ALTER TABLE Accounts ADD COLUMN BrokerName TEXT NOT NULL DEFAULT ''");
+    }
+    catch { /* column already exists */ }
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(
+            "ALTER TABLE Accounts ADD COLUMN BrokerAccountId TEXT NOT NULL DEFAULT ''");
     }
     catch { /* column already exists */ }
 }
