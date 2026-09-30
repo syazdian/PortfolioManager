@@ -125,7 +125,8 @@ else
                                 <th class="text-right">Avg Cost</th>
                                 <th class="text-right">Last Price</th>
                                 <th class="text-right">Day Chg</th>
-                                <th class="text-right">P&amp;L</th>
+                                <th class="text-right">Market Value</th>
+                                <th class="text-right">Unrealized P&amp;L</th>
                                 <th class="text-right">P&amp;L %</th>
                                 <th></th>
                             </tr>
@@ -139,17 +140,28 @@ else
                                     var c = GetCache(p.Symbol);
                                     return c != null ? PortfolioService.CalculateUnrealizedPnL(p, c.LastPrice) : 0m;
                                 });
+                                var combinedDayPnl = legs.Sum(CalculatePositionDayPnL);
+                                var combinedMarketValue = legs.Sum(CalculatePositionMarketValue);
+                                var groupNetQty = legs.Sum(p => p.Direction == PositionDirection.Short ? -p.Quantity : p.Quantity);
+                                var totalAbsQty = legs.Sum(p => p.Quantity);
+                                var groupAvgCost = totalAbsQty > 0 ? legs.Sum(p => p.AverageCost * p.Quantity) / totalAbsQty : (decimal?)null;
                                 var allHavePrice = legs.All(p => GetCache(p.Symbol) != null);
                                 <tr class="spread-group-header">
-                                    <td colspan="7">
+                                    <td>
                                         📦 <strong>@group.Key</strong>
-                                        <span class="badge badge-spread" style="margin-left:6px">SPREAD</span>
                                         <span style="color:var(--text-muted);font-size:0.78rem;margin-left:8px;font-weight:400">@legs.Count legs</span>
                                     </td>
+                                    <td><span class="badge badge-spread">SPREAD</span></td>
+                                    <td>—</td>
+                                    <td class="text-right">@groupNetQty.ToString("+0.##;-0.##;0")</td>
+                                    <td class="text-right">@(groupAvgCost?.ToString("F2") ?? "—")</td>
+                                    <td class="text-right">—</td>
+                                    <td class="text-right @PnlClass(combinedDayPnl)">@combinedDayPnl.ToString("+0.00;-0.00;0.00")</td>
+                                    <td class="text-right @PnlClass(combinedMarketValue)">@combinedMarketValue.ToString("+0.00;-0.00;0.00")</td>
                                     <td class="text-right @PnlClass(allHavePrice ? combinedPnl : (decimal?)null)">
                                         @(allHavePrice ? combinedPnl.ToString("+0.00;-0.00;0.00") : "—")
                                     </td>
-                                    <td></td>
+                                    <td class="text-right">—</td>
                                     <td></td>
                                 </tr>
                                 @for (int li = 0; li < legs.Count; li++)
@@ -161,6 +173,7 @@ else
                                     var dayChg = cache != null && cache.PreviousClose != 0
                                         ? cache.LastPrice - cache.PreviousClose : (decimal?)null;
                                     var pnl = price.HasValue ? PortfolioService.CalculateUnrealizedPnL(pos, price.Value) : (decimal?)null;
+                                    var marketValue = price.HasValue ? CalculatePositionMarketValue(pos) : (decimal?)null;
                                     var pnlPct = price.HasValue && pos.AverageCost != 0
                                         ? (price.Value - pos.AverageCost) / pos.AverageCost * 100 : (decimal?)null;
                                     var violation = PortfolioService.IsRuleViolation(account, pos.AssetType, pos.Direction);
@@ -175,6 +188,7 @@ else
                                         <td class="text-right">@pos.AverageCost.ToString("F2")</td>
                                         <td class="text-right">@(price?.ToString("F2") ?? "—")</td>
                                         <td class="text-right @PnlClass(dayChg)">@(dayChg?.ToString("+0.00;-0.00") ?? "—")</td>
+                                        <td class="text-right @PnlClass(marketValue)">@(marketValue?.ToString("+0.00;-0.00;0.00") ?? "—")</td>
                                         <td class="text-right @PnlClass(pnl)">@(pnl?.ToString("+0.00;-0.00;0.00") ?? "—")</td>
                                         <td class="text-right @PnlClass(pnlPct)">@(pnlPct != null ? pnlPct.Value.ToString("+0.00;-0.00;0.00") + "%" : "—")</td>
                                         <td><button class="btn btn-secondary btn-sm" @onclick="@(() => GoToAccount(account.Id))">→</button></td>
@@ -188,6 +202,7 @@ else
                                 var dayChg = cache != null && cache.PreviousClose != 0
                                     ? cache.LastPrice - cache.PreviousClose : (decimal?)null;
                                 var pnl = price.HasValue ? PortfolioService.CalculateUnrealizedPnL(pos, price.Value) : (decimal?)null;
+                                var marketValue = price.HasValue ? CalculatePositionMarketValue(pos) : (decimal?)null;
                                 var pnlPct = price.HasValue && pos.AverageCost != 0
                                     ? (price.Value - pos.AverageCost) / pos.AverageCost * 100 : (decimal?)null;
                                 var violation = PortfolioService.IsRuleViolation(account, pos.AssetType, pos.Direction);
@@ -202,6 +217,7 @@ else
                                     <td class="text-right">@pos.AverageCost.ToString("F2")</td>
                                     <td class="text-right">@(price?.ToString("F2") ?? "—")</td>
                                     <td class="text-right @PnlClass(dayChg)">@(dayChg?.ToString("+0.00;-0.00") ?? "—")</td>
+                                    <td class="text-right @PnlClass(marketValue)">@(marketValue?.ToString("+0.00;-0.00;0.00") ?? "—")</td>
                                     <td class="text-right @PnlClass(pnl)">@(pnl?.ToString("+0.00;-0.00;0.00") ?? "—")</td>
                                     <td class="text-right @PnlClass(pnlPct)">@(pnlPct != null ? pnlPct.Value.ToString("+0.00;-0.00;0.00") + "%" : "—")</td>
                                     <td><button class="btn btn-secondary btn-sm" @onclick="@(() => GoToAccount(account.Id))">→</button></td>
