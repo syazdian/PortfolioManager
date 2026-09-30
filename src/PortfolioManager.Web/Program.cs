@@ -20,8 +20,12 @@ builder.Services.AddDbContextFactory<AppDbContext>(options =>
 // ── Business Logic ────────────────────────────────────────────────────────────
 builder.Services.AddScoped<PortfolioService>();
 builder.Services.AddScoped<BrokerSyncService>();
+builder.Services.AddSingleton(builder.Configuration.GetSection("BrokerGateway").Get<BrokerGatewayOptions>() ?? new BrokerGatewayOptions());
+builder.Services.AddScoped<IBrokerGatewayLauncher, BrokerGatewayLauncher>();
+builder.Services.AddScoped<IBrokerSyncClient, IBrokerAccountSyncClient>();
+builder.Services.AddScoped<IBrokerPositionImportService, IBrokerAccountSyncClient>();
+builder.Services.AddScoped<IBrokerPositionImportService, QuestradePositionImportService>();
 // Register IBrokerSyncClient implementations here when ready, e.g.:
-// builder.Services.AddScoped<IBrokerSyncClient, IBrokerClient>();
 // builder.Services.AddScoped<IBrokerSyncClient, QuestradeClient>();
 
 // ── Price Feed ────────────────────────────────────────────────────────────────

@@ -1,7 +1,11 @@
 @page "/settings"
 @rendermode InteractiveServer
 @inject PortfolioService PortfolioService
+@inject IJSRuntime JS
+@inject PortfolioManager.Core.Services.BrokerGatewayOptions BrokerGatewayOptions
 @using PortfolioManager.Core.Models
+
+<script type="module" src="@Assets["Components/Pages/Settings.razor.js"]"></script>
 
 <PageTitle>Settings – Portfolio Manager</PageTitle>
 
@@ -124,6 +128,10 @@
                                 <td class="text-center" style="white-space:nowrap">
                                     <button class="btn btn-secondary btn-sm" @onclick="@(() => StartEdit(acct))">✏</button>
                                     <button class="btn btn-danger btn-sm" @onclick="@(() => ConfirmDelete(acct))">🗑</button>
+                                    @if (IsIBrokerAccount(acct))
+                                    {
+                                        <button class="btn btn-primary btn-sm" @onclick="ShowIBrokerManualLaunchAsync">🔗 Connect IBroker</button>
+                                    }
                                 </td>
                             </tr>
                         }
@@ -133,6 +141,39 @@
         </div>
     }
 </div>
+
+<!-- IBroker manual launch modal -->
+@if (_showIBrokerManualLaunch)
+{
+    <div class="pm-modal-backdrop" @onclick="HideIBrokerManualLaunch">
+        <div class="pm-modal" @onclick:stopPropagation="true" style="max-width:720px">
+            <div class="pm-modal-header">IBroker Manual Launch</div>
+            <div class="pm-modal-body">
+                <p style="margin-top:0">Do this manually:</p>
+                <ol style="margin-left:18px">
+                    <li>Go to command prompt</li>
+                    <li>Copy this command</li>
+                    <li>Open browser to <strong>@GetBrokerLoginUrl()</strong></li>
+                </ol>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <input id="ibroker-manual-launch-command" class="pm-input" style="flex:1;min-width:380px" readonly value="@IBrokerManualCommand" />
+                    <button class="btn btn-primary btn-sm" @onclick="CopyIBrokerCommandAsync">Copy</button>
+                </div>
+                <div style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated)">
+                    <div><strong>Username:</strong> @BrokerGatewayOptions.BrokerUsername</div>
+                    <div><strong>Password:</strong> @BrokerGatewayOptions.BrokerPassword</div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
+                    <button class="btn btn-success btn-sm" @onclick="OpenIBrokerBrowserAsync">Open browser to @GetBrokerLoginUrl()</button>
+                </div>
+                <p style="margin-top:12px;color:var(--text-muted);font-size:0.9rem">Paste the command into Command Prompt and press Enter.</p>
+            </div>
+            <div class="pm-modal-footer">
+                <button class="btn btn-secondary" @onclick="HideIBrokerManualLaunch">Close</button>
+            </div>
+        </div>
+    </div>
+}
 
 <!-- Delete confirm modal -->
 @if (_deleteTarget is not null)
@@ -175,11 +216,41 @@
     // Delete
     Account? _deleteTarget;
 
+    // IBroker manual launch
+    bool _showIBrokerManualLaunch;
+    const string IBrokerManualCommand = @"cd C:\Users\syazd\Downloads\Compressed\clientportal.gw && bin\run.bat root\conf.yaml";
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     async Task LoadAsync()
     {
         _accounts = await PortfolioService.GetAccountsAsync();
+    }
+
+    bool IsIBrokerAccount(Account acct) => string.Equals(acct.BrokerName, "IBroker", StringComparison.OrdinalIgnoreCase);
+
+    Task ShowIBrokerManualLaunchAsync()
+    {
+        _showIBrokerManualLaunch = true;
+        return Task.CompletedTask;
+    }
+
+    Task HideIBrokerManualLaunch()
+    {
+        _showIBrokerManualLaunch = false;
+        return Task.CompletedTask;
+    }
+
+    string GetBrokerLoginUrl() => string.IsNullOrWhiteSpace(BrokerGatewayOptions.LoginUrl) ? "https://localhost:5000/" : BrokerGatewayOptions.LoginUrl;
+
+    async Task OpenIBrokerBrowserAsync()
+    {
+        await JS.InvokeVoidAsync("ibrokerManualLaunch.openBrowser", GetBrokerLoginUrl());
+    }
+
+    async Task CopyIBrokerCommandAsync()
+    {
+        await JS.InvokeVoidAsync("ibrokerManualLaunch.copy", IBrokerManualCommand);
     }
 
     void StartAdd()

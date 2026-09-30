@@ -4,8 +4,13 @@
 @inject PriceState PriceState
 @inject PriceRefreshService PriceRefreshService
 @inject BrokerSyncService BrokerSyncService
+@inject IEnumerable<IBrokerPositionImportService> BrokerPositionImportServices
+@inject BrokerGatewayOptions BrokerGatewayOptions
+@inject IJSRuntime JS
 @inject NavigationManager Nav
 @implements IDisposable
+
+<script type="module" src="@Assets["Components/Pages/Home.razor.js"]"></script>
 
 <PageTitle>Dashboard – Portfolio Manager</PageTitle>
 
@@ -192,12 +197,47 @@ else
     }
 }
 
+@if (_showManualSyncModal && _manualSyncAccount is not null)
+{
+    <div class="pm-modal-backdrop" @onclick="CloseManualSyncModal">
+        <div class="pm-modal" @onclick:stopPropagation="true" style="max-width:760px">
+            <div class="pm-modal-header">Manual @(_manualSyncAccount.BrokerName) Sync</div>
+            <div class="pm-modal-body">
+                <p style="margin-top:0">Copy this URL into your browser and paste the JSON response below.</p>
+                <div class="pm-field" style="margin-bottom:12px">
+                    <label class="pm-label">URL</label>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <input class="pm-input" id="manual-sync-url" readonly value="@GetManualSyncUrl()" style="width:100%" />
+                        <button class="btn btn-secondary btn-sm" @onclick="CopyManualSyncUrlAsync">Copy URL</button>
+                    </div>
+                </div>
+                <div class="pm-field">
+                    <label class="pm-label">JSON</label>
+                    <textarea class="pm-input" rows="12" style="width:100%;resize:vertical" @bind="_manualSyncJson"></textarea>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_manualSyncError))
+                {
+                    <div class="pm-alert pm-alert-danger" style="margin-top:12px">@_manualSyncError</div>
+                }
+            </div>
+            <div class="pm-modal-footer">
+                <button class="btn btn-primary" @onclick="ImportManualSyncJsonAsync">Import JSON</button>
+                <button class="btn btn-secondary" @onclick="CloseManualSyncModal">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<Account>? _accounts;
     private Dictionary<string, PriceCache> _priceCache = [];
     private bool _refreshing;
     private Dictionary<int, bool> _syncingAccounts = [];
     private Dictionary<int, string?> _syncErrors = [];
+    private Account? _manualSyncAccount;
+    private bool _showManualSyncModal;
+    private string _manualSyncJson = string.Empty;
+    private string? _manualSyncError;
 
     private static readonly System.Globalization.CultureInfo CadCulture = new("en-CA");
     private static readonly System.Globalization.CultureInfo UsdCulture = new("en-US");
@@ -233,6 +273,12 @@ else
 
     private async Task SyncAccountAsync(Account account)
     {
+        if (SupportsManualJsonImport(account))
+        {
+            OpenManualSyncModal(account);
+            return;
+        }
+
         _syncingAccounts[account.Id] = true;
         _syncErrors.Remove(account.Id);
         StateHasChanged();
@@ -253,6 +299,82 @@ else
             _syncingAccounts[account.Id] = false;
             StateHasChanged();
         }
+    }
+
+    private bool SupportsManualJsonImport(Account account) =>
+        !string.IsNullOrWhiteSpace(account.BrokerName) &&
+        BrokerPositionImportServices.Any(s => s.BrokerName.Equals(account.BrokerName, StringComparison.OrdinalIgnoreCase));
+
+    private void OpenManualSyncModal(Account account)
+    {
+        _manualSyncAccount = account;
+        _manualSyncJson = string.Empty;
+        _manualSyncError = null;
+        _showManualSyncModal = true;
+    }
+
+    private void CloseManualSyncModal()
+    {
+        _showManualSyncModal = false;
+        _manualSyncAccount = null;
+        _manualSyncJson = string.Empty;
+        _manualSyncError = null;
+    }
+
+    private string GetManualSyncUrl()
+    {
+        if (_manualSyncAccount is null || string.IsNullOrWhiteSpace(_manualSyncAccount.BrokerAccountId))
+            return string.Empty;
+
+        if (_manualSyncAccount.BrokerName.Equals("IBroker", StringComparison.OrdinalIgnoreCase))
+        {
+            var baseUrl = string.IsNullOrWhiteSpace(BrokerGatewayOptions.LoginUrl) ? "https://localhost:5000/" : BrokerGatewayOptions.LoginUrl;
+            return new Uri(new Uri(baseUrl, UriKind.Absolute), $"v1/api/portfolio/{Uri.EscapeDataString(_manualSyncAccount.BrokerAccountId)}/positions/0").ToString();
+        }
+
+        if (_manualSyncAccount.BrokerName.Equals("Questrade", StringComparison.OrdinalIgnoreCase))
+            return $"https://api.questrade.com/v1/accounts/{Uri.EscapeDataString(_manualSyncAccount.BrokerAccountId)}/positions";
+
+        return string.Empty;
+    }
+
+    private async Task CopyManualSyncUrlAsync()
+    {
+        var url = GetManualSyncUrl();
+        if (!string.IsNullOrWhiteSpace(url))
+            await JS.InvokeVoidAsync("ibrokerBrowserSync.copyText", url);
+    }
+
+    private async Task ImportManualSyncJsonAsync()
+    {
+        if (_manualSyncAccount is null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(_manualSyncJson))
+        {
+            _manualSyncError = "Paste the JSON response first.";
+            return;
+        }
+
+        var importer = BrokerPositionImportServices.FirstOrDefault(s =>
+            s.BrokerName.Equals(_manualSyncAccount.BrokerName, StringComparison.OrdinalIgnoreCase));
+
+        if (importer is null)
+        {
+            _manualSyncError = $"No JSON importer configured for broker '{_manualSyncAccount.BrokerName}'.";
+            return;
+        }
+
+        var result = await importer.ImportPositionsAsync(_manualSyncAccount, _manualSyncJson);
+        if (!result.Success)
+        {
+            _manualSyncError = result.Message ?? "Import failed.";
+            return;
+        }
+
+        _syncErrors.Remove(_manualSyncAccount.Id);
+        CloseManualSyncModal();
+        await LoadAsync();
     }
     private async void OnPricesUpdated()
     {
