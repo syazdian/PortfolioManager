@@ -50,6 +50,14 @@ else
             <div class="label">Unrealized P&amp;L</div>
             <div class="value @PnlClass(TotalPnL)">@TotalPnL.ToString("+0.00;-0.00;0.00")</div>
         </div>
+        <div class="stat-card">
+            <div class="label">Market Value</div>
+            <div class="value @PnlClass(TotalMarketValue)">@TotalMarketValue.ToString("+0.00;-0.00;0.00")</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Day P&amp;L</div>
+            <div class="value @PnlClass(TotalDayPnL)">@TotalDayPnL.ToString("+0.00;-0.00;0.00")</div>
+        </div>
     </div>
 
     @foreach (var account in _accounts)
@@ -61,12 +69,22 @@ else
                     <span class="account-name">@account.Name</span>
                     <span class="badge @AccountTypeBadge(account.Type)">@account.Type</span>
                     <span class="badge badge-owner">@account.Owner</span>
+                    @if (!string.IsNullOrWhiteSpace(account.BrokerAccountId))
+                    {
+                        <span class="badge badge-owner">#@account.BrokerAccountId</span>
+                    }
                 </div>
                 <div class="account-meta">
                     <span class="account-cash">
                         CAD <strong>@account.CashCAD.ToString("C2", CadCulture)</strong>
                         &nbsp;|&nbsp;
                         USD <strong>@account.CashUSD.ToString("C2", UsdCulture)</strong>
+                        &nbsp;|&nbsp;
+                        Day P&amp;L <strong class="@PnlClass(AccountDayPnL(account))">@AccountDayPnL(account).ToString("+0.00;-0.00;0.00")</strong>
+                        &nbsp;|&nbsp;
+                        Unrealized P&amp;L <strong class="@PnlClass(AccountTotalPnL(account))">@AccountTotalPnL(account).ToString("+0.00;-0.00;0.00")</strong>
+                        &nbsp;|&nbsp;
+                        Market Value <strong class="@PnlClass(AccountMarketValue(account))">@AccountMarketValue(account).ToString("+0.00;-0.00;0.00")</strong>
                     </span>
                     @if (!string.IsNullOrEmpty(account.BrokerName))
                     {
@@ -203,18 +221,57 @@ else
         <div class="pm-modal" @onclick:stopPropagation="true" style="max-width:760px">
             <div class="pm-modal-header">Manual @(_manualSyncAccount.BrokerName) Sync</div>
             <div class="pm-modal-body">
-                <p style="margin-top:0">Copy this URL into your browser and paste the JSON response below.</p>
-                <div class="pm-field" style="margin-bottom:12px">
-                    <label class="pm-label">URL</label>
-                    <div style="display:flex;gap:8px;align-items:center">
-                        <input class="pm-input" id="manual-sync-url" readonly value="@GetManualSyncUrl()" style="width:100%" />
-                        <button class="btn btn-secondary btn-sm" @onclick="CopyManualSyncUrlAsync">Copy URL</button>
+                @if (IsQuestradeAccount(_manualSyncAccount))
+                {
+                    <div class="pm-field" style="margin-bottom:12px">
+                        <label class="pm-label">1) Token URL</label>
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <input class="pm-input" readonly value="@GetQuestradeTokenUrl()" style="width:100%" />
+                            <button class="btn btn-secondary btn-sm" @onclick="@(() => CopyTextAsync(GetQuestradeTokenUrl()))">Copy URL</button>
+                        </div>
                     </div>
-                </div>
-                <div class="pm-field">
-                    <label class="pm-label">JSON</label>
-                    <textarea class="pm-input" rows="12" style="width:100%;resize:vertical" @bind="_manualSyncJson"></textarea>
-                </div>
+                    <div class="pm-field" style="margin-bottom:12px">
+                        <label class="pm-label">2) Refresh Token</label>
+                        <input class="pm-input" @bind="_questradeRefreshToken" placeholder="Paste refresh token" style="width:100%" />
+                    </div>
+                    <div class="pm-field" style="margin-bottom:12px">
+                        <label class="pm-label">3) Token JSON (from Postman)</label>
+                        <textarea class="pm-input" rows="6" style="width:100%;resize:vertical" @bind="_questradeTokenJson"></textarea>
+                        <div style="margin-top:8px">
+                            <button class="btn btn-secondary btn-sm" @onclick="ApplyQuestradeTokenJson">Apply Token JSON</button>
+                        </div>
+                    </div>
+                    <div class="pm-field" style="margin-bottom:12px">
+                        <label class="pm-label">4) Account Position URL</label>
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <input class="pm-input" readonly value="@GetManualSyncUrl()" style="width:100%" />
+                            <button class="btn btn-secondary btn-sm" @onclick="@(() => CopyTextAsync(GetManualSyncUrl()))">Copy URL</button>
+                        </div>
+                        <div style="color:var(--text-muted);font-size:0.85rem;margin-top:6px">
+                            Go to Authorization -> Bearer Token and paste access_token: <strong>@(_questradeAccessToken ?? "(apply token JSON to populate)")</strong>
+                        </div>
+                    </div>
+                    <div class="pm-field">
+                        <label class="pm-label">5) Account JSON</label>
+                        <textarea class="pm-input" rows="12" style="width:100%;resize:vertical" @bind="_manualSyncJson"></textarea>
+                    </div>
+                }
+                else
+                {
+                    <p style="margin-top:0">Copy this URL into your browser and paste the JSON response below.</p>
+                    <div class="pm-field" style="margin-bottom:12px">
+                        <label class="pm-label">URL</label>
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <input class="pm-input" id="manual-sync-url" readonly value="@GetManualSyncUrl()" style="width:100%" />
+                            <button class="btn btn-secondary btn-sm" @onclick="CopyManualSyncUrlAsync">Copy URL</button>
+                        </div>
+                    </div>
+                    <div class="pm-field">
+                        <label class="pm-label">JSON</label>
+                        <textarea class="pm-input" rows="12" style="width:100%;resize:vertical" @bind="_manualSyncJson"></textarea>
+                    </div>
+                }
+
                 @if (!string.IsNullOrWhiteSpace(_manualSyncError))
                 {
                     <div class="pm-alert pm-alert-danger" style="margin-top:12px">@_manualSyncError</div>
@@ -238,6 +295,10 @@ else
     private bool _showManualSyncModal;
     private string _manualSyncJson = string.Empty;
     private string? _manualSyncError;
+    private string _questradeRefreshToken = string.Empty;
+    private string _questradeTokenJson = string.Empty;
+    private string? _questradeApiServer;
+    private string? _questradeAccessToken;
 
     private static readonly System.Globalization.CultureInfo CadCulture = new("en-CA");
     private static readonly System.Globalization.CultureInfo UsdCulture = new("en-US");
@@ -245,9 +306,9 @@ else
     private decimal TotalCashCAD   => _accounts?.Sum(a => a.CashCAD) ?? 0;
     private decimal TotalCashUSD   => _accounts?.Sum(a => a.CashUSD) ?? 0;
     private int     TotalPositions => _accounts?.Sum(a => a.Positions.Count(p => p.IsOpen)) ?? 0;
-    private decimal TotalPnL       => _accounts?
-        .SelectMany(a => a.Positions.Where(p => p.IsOpen))
-        .Sum(p => GetCache(p.Symbol) is { } c ? PortfolioService.CalculateUnrealizedPnL(p, c.LastPrice) : 0) ?? 0;
+    private decimal TotalPnL       => _accounts?.Sum(AccountTotalPnL) ?? 0;
+    private decimal TotalMarketValue => _accounts?.Sum(AccountMarketValue) ?? 0;
+    private decimal TotalDayPnL    => _accounts?.Sum(AccountDayPnL) ?? 0;
 
     protected override async Task OnInitializedAsync()
     {
@@ -310,6 +371,10 @@ else
         _manualSyncAccount = account;
         _manualSyncJson = string.Empty;
         _manualSyncError = null;
+        _questradeRefreshToken = string.Empty;
+        _questradeTokenJson = string.Empty;
+        _questradeApiServer = null;
+        _questradeAccessToken = null;
         _showManualSyncModal = true;
     }
 
@@ -319,7 +384,14 @@ else
         _manualSyncAccount = null;
         _manualSyncJson = string.Empty;
         _manualSyncError = null;
+        _questradeRefreshToken = string.Empty;
+        _questradeTokenJson = string.Empty;
+        _questradeApiServer = null;
+        _questradeAccessToken = null;
     }
+
+    private static bool IsQuestradeAccount(Account account) =>
+        account.BrokerName.Equals("Questrade", StringComparison.OrdinalIgnoreCase);
 
     private string GetManualSyncUrl()
     {
@@ -332,17 +404,79 @@ else
             return new Uri(new Uri(baseUrl, UriKind.Absolute), $"v1/api/portfolio/{Uri.EscapeDataString(_manualSyncAccount.BrokerAccountId)}/positions/0").ToString();
         }
 
-        if (_manualSyncAccount.BrokerName.Equals("Questrade", StringComparison.OrdinalIgnoreCase))
-            return $"https://api.questrade.com/v1/accounts/{Uri.EscapeDataString(_manualSyncAccount.BrokerAccountId)}/positions";
+        if (IsQuestradeAccount(_manualSyncAccount))
+            return BuildQuestradeAccountUrl(_manualSyncAccount.BrokerAccountId);
 
         return string.Empty;
+    }
+
+    private string GetQuestradeTokenUrl()
+    {
+        var refreshToken = Uri.EscapeDataString(_questradeRefreshToken ?? string.Empty);
+        return $"https://login.questrade.com/oauth2/token?grant_type=refresh_token&refresh_token={refreshToken}";
+    }
+
+    private IEnumerable<string> GetQuestradeAccountPositionUrls()
+    {
+        if (_accounts is null)
+            return [];
+
+        return _accounts
+            .Where(a => IsQuestradeAccount(a) && !string.IsNullOrWhiteSpace(a.BrokerAccountId))
+            .Select(a => BuildQuestradeAccountUrl(a.BrokerAccountId))
+            .Distinct()
+            .ToList();
+    }
+
+    private string BuildQuestradeAccountUrl(string brokerAccountId)
+    {
+        var apiServer = string.IsNullOrWhiteSpace(_questradeApiServer) ? "https://api.questrade.com/" : _questradeApiServer;
+        if (!apiServer.EndsWith('/'))
+            apiServer += "/";
+
+        return new Uri(new Uri(apiServer, UriKind.Absolute), $"v1/accounts/{Uri.EscapeDataString(brokerAccountId)}/positions").ToString();
+    }
+
+    private void ApplyQuestradeTokenJson()
+    {
+        if (string.IsNullOrWhiteSpace(_questradeTokenJson))
+        {
+            _manualSyncError = "Paste the token JSON first.";
+            return;
+        }
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(_questradeTokenJson);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("refresh_token", out var refreshTokenElement))
+                _questradeRefreshToken = refreshTokenElement.GetString() ?? _questradeRefreshToken;
+
+            if (root.TryGetProperty("api_server", out var apiServerElement))
+                _questradeApiServer = apiServerElement.GetString();
+
+            if (root.TryGetProperty("access_token", out var accessTokenElement))
+                _questradeAccessToken = accessTokenElement.GetString();
+
+            _manualSyncError = null;
+        }
+        catch (Exception ex)
+        {
+            _manualSyncError = $"Failed to parse token JSON: {ex.Message}";
+        }
+    }
+
+    private async Task CopyTextAsync(string text)
+    {
+        if (!string.IsNullOrWhiteSpace(text))
+            await JS.InvokeVoidAsync("ibrokerBrowserSync.copyText", text);
     }
 
     private async Task CopyManualSyncUrlAsync()
     {
         var url = GetManualSyncUrl();
-        if (!string.IsNullOrWhiteSpace(url))
-            await JS.InvokeVoidAsync("ibrokerBrowserSync.copyText", url);
+        await CopyTextAsync(url);
     }
 
     private async Task ImportManualSyncJsonAsync()
@@ -376,6 +510,41 @@ else
         CloseManualSyncModal();
         await LoadAsync();
     }
+
+    private decimal AccountTotalPnL(Account account) =>
+        account.Positions
+            .Where(p => p.IsOpen)
+            .Sum(p => GetCache(p.Symbol) is { } c ? PortfolioService.CalculateUnrealizedPnL(p, c.LastPrice) : 0m);
+
+    private decimal AccountDayPnL(Account account) =>
+        account.Positions
+            .Where(p => p.IsOpen)
+            .Sum(CalculatePositionDayPnL);
+
+    private decimal AccountMarketValue(Account account) =>
+        account.Positions
+            .Where(p => p.IsOpen)
+            .Sum(CalculatePositionMarketValue);
+
+    private decimal CalculatePositionDayPnL(Position position)
+    {
+        var cache = GetCache(position.Symbol);
+        if (cache is null)
+            return 0m;
+
+        var multiplier = position.AssetType == AssetType.Stock ? 1m : 100m;
+        var delta = (cache.LastPrice - cache.PreviousClose) * position.Quantity * multiplier;
+        return position.Direction == PositionDirection.Short ? -delta : delta;
+    }
+
+    private decimal CalculatePositionMarketValue(Position position)
+    {
+        var price = GetCache(position.Symbol)?.LastPrice ?? position.AverageCost;
+        var multiplier = position.AssetType == AssetType.Stock ? 1m : 100m;
+        var signedQuantity = position.Direction == PositionDirection.Short ? -position.Quantity : position.Quantity;
+        return price * signedQuantity * multiplier;
+    }
+
     private async void OnPricesUpdated()
     {
         _priceCache = await PortfolioService.GetPriceCacheAsync();

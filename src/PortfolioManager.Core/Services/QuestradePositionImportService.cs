@@ -43,19 +43,22 @@ public sealed class QuestradePositionImportService(IDbContextFactory<AppDbContex
             .Where(p => p.OpenQuantity != 0)
             .Select(MapPosition)
             .Where(p => p is not null)
-            .Cast<Position>()
+            .Cast<MappedQuestradePosition>()
             .ToList();
 
-        ApplySpreadGrouping(mappedPositions);
+        var positionEntities = mappedPositions.Select(m => m.Position).ToList();
+        ApplySpreadGrouping(positionEntities);
 
-        foreach (var position in mappedPositions)
+        foreach (var position in positionEntities)
         {
             position.AccountId = dbAccount.Id;
             db.Positions.Add(position);
         }
 
+        UpsertPriceCacheFromQuestrade(db, mappedPositions);
+
         await db.SaveChangesAsync(ct);
-        return BrokerSyncResult.Ok($"Imported {mappedPositions.Count} Questrade positions for {dbAccount.Name}.");
+        return BrokerSyncResult.Ok($"Imported {positionEntities.Count} Questrade positions for {dbAccount.Name}.");
     }
 
     private static async Task ClearExistingPositionsAsync(AppDbContext db, int accountId, CancellationToken ct)
@@ -71,7 +74,7 @@ public sealed class QuestradePositionImportService(IDbContextFactory<AppDbContex
         await db.SaveChangesAsync(ct);
     }
 
-    private static Position? MapPosition(QuestradePositionDto dto)
+    private static MappedQuestradePosition? MapPosition(QuestradePositionDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.Symbol))
             return null;
@@ -112,7 +115,7 @@ public sealed class QuestradePositionImportService(IDbContextFactory<AppDbContex
             position.AssetType = AssetType.Stock;
         }
 
-        return position;
+        return new MappedQuestradePosition(position, dto.CurrentPrice, dto.DayPnl);
     }
 
     private static void ApplySpreadGrouping(List<Position> positions)
@@ -130,7 +133,51 @@ public sealed class QuestradePositionImportService(IDbContextFactory<AppDbContex
         }
     }
 
+    private static void UpsertPriceCacheFromQuestrade(AppDbContext db, IEnumerable<MappedQuestradePosition> mappedPositions)
+    {
+        foreach (var mapped in mappedPositions)
+        {
+            if (mapped.CurrentPrice <= 0)
+                continue;
+
+            var multiplier = mapped.Position.AssetType == AssetType.Stock ? 1m : 100m;
+            var directionalMultiplier = mapped.Position.Direction == PositionDirection.Short ? -1m : 1m;
+            var denominator = mapped.Position.Quantity * multiplier * directionalMultiplier;
+
+            var previousClose = mapped.CurrentPrice;
+            if (denominator != 0)
+                previousClose = mapped.CurrentPrice - (mapped.DayPnl / denominator);
+
+            var existing = db.PriceCache.Find(mapped.Position.Symbol);
+            if (existing is null)
+            {
+                db.PriceCache.Add(new PriceCache
+                {
+                    Symbol = mapped.Position.Symbol,
+                    LastPrice = mapped.CurrentPrice,
+                    PreviousClose = previousClose,
+                    Currency = mapped.Position.Currency,
+                    FetchedAt = DateTime.UtcNow
+                });
+            }
+            else
+            {
+                existing.LastPrice = mapped.CurrentPrice;
+                existing.PreviousClose = previousClose;
+                existing.Currency = mapped.Position.Currency;
+                existing.FetchedAt = DateTime.UtcNow;
+            }
+        }
+    }
+
     private sealed record QuestradePositionsResponse(List<QuestradePositionDto> Positions);
 
-    private sealed record QuestradePositionDto(string Symbol, decimal OpenQuantity, decimal AverageEntryPrice);
+    private sealed record QuestradePositionDto(
+        string Symbol,
+        decimal OpenQuantity,
+        decimal AverageEntryPrice,
+        decimal CurrentPrice,
+        decimal DayPnl);
+
+    private sealed record MappedQuestradePosition(Position Position, decimal CurrentPrice, decimal DayPnl);
 }
