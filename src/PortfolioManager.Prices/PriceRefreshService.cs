@@ -27,16 +27,10 @@ public class PriceRefreshService(
         await RefreshAsync(CancellationToken.None);
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Price refresh service started. Interval: {Interval}", Interval);
-
-        // Refresh immediately on startup, then every 15 min
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            await RefreshAsync(stoppingToken);
-            await Task.Delay(Interval, stoppingToken);
-        }
+        logger.LogInformation("Price refresh service started in manual-only mode. Automatic refresh is disabled to conserve API quota.");
+        return Task.CompletedTask;
     }
 
     private async Task RefreshAsync(CancellationToken ct)
