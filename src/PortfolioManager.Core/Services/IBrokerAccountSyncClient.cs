@@ -153,7 +153,24 @@ public sealed class IBrokerAccountSyncClient(IDbContextFactory<AppDbContext> dbF
         var currency = ParseCurrency(dto.Currency);
         var assetType = ParseAssetType(dto, contractInfo);
         var exchange = currency == Currency.CAD ? Exchange.CA : Exchange.US;
-        var averageCost = dto.AvgPrice > 0 ? dto.AvgPrice : dto.AvgCost;
+
+        // For options: avgPrice is the per-share option premium (e.g. 15.60).
+        // avgCost is avgPrice × 100 (total contract cost). We always want the per-share price.
+        // For stocks: avgCost is the per-share cost basis.
+        decimal averageCost;
+        if (assetType != AssetType.Stock)
+        {
+            // Option: prefer avgPrice (per-share premium). Fall back to avgCost / 100 if avgPrice is 0.
+            averageCost = dto.AvgPrice > 0 ? dto.AvgPrice : dto.AvgCost / 100m;
+        }
+        else
+        {
+            averageCost = dto.AvgCost > 0 ? dto.AvgCost : dto.AvgPrice;
+        }
+
+        // Store broker's live option price so the UI can display it correctly.
+        // For stocks, mktPrice is the same as what Yahoo would fetch.
+        var lastBrokerPrice = dto.MktPrice > 0 ? dto.MktPrice : (decimal?)null;
 
         var (strikePrice, expiryDate) = assetType == AssetType.Stock
             ? (null, null)
@@ -168,6 +185,7 @@ public sealed class IBrokerAccountSyncClient(IDbContextFactory<AppDbContext> dbF
             Currency = currency,
             Quantity = quantity,
             AverageCost = averageCost,
+            LastBrokerPrice = lastBrokerPrice,
             StrikePrice = strikePrice,
             ExpiryDate = expiryDate,
             IsOpen = true

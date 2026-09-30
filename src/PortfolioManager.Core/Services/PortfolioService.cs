@@ -169,9 +169,24 @@ public class PortfolioService(IDbContextFactory<AppDbContext> dbFactory)
     // ── P&L ──────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Calculates unrealized P&L for a position given a current market price.
+    /// Returns the effective live price for a position.
+    /// For options: uses the broker's last synced option premium (LastBrokerPrice) because
+    ///   fetching the underlying ticker from Yahoo returns the STOCK price, not the option price.
+    /// For stocks: uses the Yahoo price cache.
+    /// Returns null if no price is available.
+    /// </summary>
+    public static decimal? GetEffectivePrice(Position position, IReadOnlyDictionary<string, PriceCache> priceCache)
+    {
+        if (position.AssetType != AssetType.Stock)
+            return position.LastBrokerPrice;          // option premium from broker
+
+        return priceCache.TryGetValue(position.Symbol, out var c) ? c.LastPrice : null;
+    }
+
+    /// <summary>
+    /// Calculates unrealized P&amp;L for a position given a current market price.
     /// Options: multiplied by 100 (1 contract = 100 shares).
-    /// Short positions: P&L is reversed.
+    /// Short positions: P&amp;L is reversed.
     /// </summary>
     public static decimal CalculateUnrealizedPnL(Position position, decimal currentPrice)
     {

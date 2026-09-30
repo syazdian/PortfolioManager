@@ -1,4 +1,4 @@
-﻿@page "/"
+@page "/"
 @rendermode InteractiveServer
 @inject PortfolioService PortfolioService
 @inject PriceState PriceState
@@ -137,74 +137,77 @@ else
                                 var legs = group.ToList();
                                 var combinedPnl = legs.Sum(p =>
                                 {
-                                    var c = GetCache(p.Symbol);
-                                    return c != null ? PortfolioService.CalculateUnrealizedPnL(p, c.LastPrice) : 0m;
+                                    var effectivePrice = PortfolioService.GetEffectivePrice(p, _priceCache);
+                                    return effectivePrice.HasValue ? PortfolioService.CalculateUnrealizedPnL(p, effectivePrice.Value) : 0m;
                                 });
-                                var combinedDayPnl = legs.Sum(CalculatePositionDayPnL);
                                 var combinedMarketValue = legs.Sum(CalculatePositionMarketValue);
                                 var groupNetQty = legs.Sum(p => p.Direction == PositionDirection.Short ? -p.Quantity : p.Quantity);
-                                var totalAbsQty = legs.Sum(p => p.Quantity);
-                                var groupAvgCost = totalAbsQty > 0 ? legs.Sum(p => p.AverageCost * p.Quantity) / totalAbsQty : (decimal?)null;
-                                var allHavePrice = legs.All(p => GetCache(p.Symbol) != null);
-                                <tr class="spread-group-header">
-                                    <td>
-                                        📦 <strong>@group.Key</strong>
-                                        <span style="color:var(--text-muted);font-size:0.78rem;margin-left:8px;font-weight:400">@legs.Count legs</span>
+                                var allHavePrice = legs.All(p => PortfolioService.GetEffectivePrice(p, _priceCache).HasValue);
+                                var groupKey = $"{account.Id}:{group.Key}";
+                                bool isExpanded = !_collapsedGroups.Contains(groupKey);
+
+                                <tr class="spread-group-header" @onclick="@(() => ToggleGroup(groupKey))" style="cursor:pointer">
+                                    <td colspan="2">
+                                        <span style="margin-right:6px;user-select:none">@(isExpanded ? "▾" : "▸")</span>
+                                        <strong>@group.Key</strong>
                                     </td>
-                                    <td><span class="badge badge-spread">SPREAD</span></td>
-                                    <td>—</td>
+                                    <td style="color:var(--text-muted);font-size:0.82em">@legs.Count legs</td>
                                     <td class="text-right">@groupNetQty.ToString("+0.##;-0.##;0")</td>
-                                    <td class="text-right">@(groupAvgCost?.ToString("F2") ?? "—")</td>
-                                    <td class="text-right">—</td>
-                                    <td class="text-right @PnlClass(combinedDayPnl)">@combinedDayPnl.ToString("+0.00;-0.00;0.00")</td>
-                                    <td class="text-right @PnlClass(combinedMarketValue)">@combinedMarketValue.ToString("+0.00;-0.00;0.00")</td>
+                                    <td colspan="3"></td>
+                                    <td class="text-right @PnlClass(allHavePrice ? combinedMarketValue : (decimal?)null)">
+                                        @(allHavePrice ? combinedMarketValue.ToString("+0.00;-0.00;0.00") : "—")
+                                    </td>
                                     <td class="text-right @PnlClass(allHavePrice ? combinedPnl : (decimal?)null)">
                                         @(allHavePrice ? combinedPnl.ToString("+0.00;-0.00;0.00") : "—")
                                     </td>
-                                    <td class="text-right">—</td>
-                                    <td></td>
+                                    <td colspan="2"></td>
                                 </tr>
-                                @for (int li = 0; li < legs.Count; li++)
+                                @if (isExpanded)
                                 {
-                                    var pos = legs[li];
-                                    var isLast = li == legs.Count - 1;
-                                    var cache = GetCache(pos.Symbol);
-                                    var price = cache?.LastPrice;
-                                    var dayChg = cache != null && cache.PreviousClose != 0
-                                        ? cache.LastPrice - cache.PreviousClose : (decimal?)null;
-                                    var pnl = price.HasValue ? PortfolioService.CalculateUnrealizedPnL(pos, price.Value) : (decimal?)null;
-                                    var marketValue = price.HasValue ? CalculatePositionMarketValue(pos) : (decimal?)null;
-                                    var pnlPct = price.HasValue && pos.AverageCost != 0
-                                        ? (price.Value - pos.AverageCost) / pos.AverageCost * 100 : (decimal?)null;
-                                    var violation = PortfolioService.IsRuleViolation(account, pos.AssetType, pos.Direction);
-                                    <tr class="spread-leg @(isLast ? "spread-leg-last" : "")">
-                                        <td>
-                                            @pos.Symbol
-                                            @if (violation) { <span class="badge badge-warn" title="Rule violation">⚠</span> }
-                                        </td>
-                                        <td><span class="badge @AssetBadge(pos.AssetType)">@pos.AssetType</span></td>
-                                        <td><span class="badge @DirBadge(pos.Direction)">@pos.Direction</span></td>
-                                        <td class="text-right">@pos.Quantity</td>
-                                        <td class="text-right">@pos.AverageCost.ToString("F2")</td>
-                                        <td class="text-right">@(price?.ToString("F2") ?? "—")</td>
-                                        <td class="text-right @PnlClass(dayChg)">@(dayChg?.ToString("+0.00;-0.00") ?? "—")</td>
-                                        <td class="text-right @PnlClass(marketValue)">@(marketValue?.ToString("+0.00;-0.00;0.00") ?? "—")</td>
-                                        <td class="text-right @PnlClass(pnl)">@(pnl?.ToString("+0.00;-0.00;0.00") ?? "—")</td>
-                                        <td class="text-right @PnlClass(pnlPct)">@(pnlPct != null ? pnlPct.Value.ToString("+0.00;-0.00;0.00") + "%" : "—")</td>
-                                        <td><button class="btn btn-secondary btn-sm" @onclick="@(() => GoToAccount(account.Id))">→</button></td>
-                                    </tr>
+                                    for (int li = 0; li < legs.Count; li++)
+                                    {
+                                        var pos = legs[li];
+                                        var isLast = li == legs.Count - 1;
+                                        var cache = GetCache(pos.Symbol);
+                                        var price = PortfolioService.GetEffectivePrice(pos, _priceCache);
+                                        // Day change only applies to stocks (options don't have Yahoo previous-close)
+                                        var dayChg = pos.AssetType == AssetType.Stock && cache != null && cache.PreviousClose != 0
+                                            ? cache.LastPrice - cache.PreviousClose : (decimal?)null;
+                                        var pnl = price.HasValue ? PortfolioService.CalculateUnrealizedPnL(pos, price.Value) : (decimal?)null;
+                                        var marketValue = price.HasValue ? CalculatePositionMarketValue(pos) : (decimal?)null;
+                                        var pnlPct = price.HasValue && pos.AverageCost != 0 && pnl.HasValue
+                                            ? pnl.Value / (pos.AverageCost * pos.Quantity * (pos.AssetType == AssetType.Stock ? 1m : 100m)) * 100 : (decimal?)null;
+                                        var violation = PortfolioService.IsRuleViolation(account, pos.AssetType, pos.Direction);
+                                        <tr class="spread-leg @(isLast ? "spread-leg-last" : "")">
+                                            <td>
+                                                @pos.Symbol
+                                                @if (violation) { <span class="badge badge-warn" title="Rule violation">⚠</span> }
+                                            </td>
+                                            <td><span class="badge @AssetBadge(pos.AssetType)">@pos.AssetType</span></td>
+                                            <td><span class="badge @DirBadge(pos.Direction)">@pos.Direction</span></td>
+                                            <td class="text-right">@pos.Quantity</td>
+                                            <td class="text-right">@pos.AverageCost.ToString("F2")</td>
+                                            <td class="text-right">@(price?.ToString("F2") ?? "—")</td>
+                                            <td class="text-right @PnlClass(dayChg)">@(dayChg?.ToString("+0.00;-0.00") ?? "—")</td>
+                                            <td class="text-right @PnlClass(marketValue)">@(marketValue?.ToString("+0.00;-0.00;0.00") ?? "—")</td>
+                                            <td class="text-right @PnlClass(pnl)">@(pnl?.ToString("+0.00;-0.00;0.00") ?? "—")</td>
+                                            <td class="text-right @PnlClass(pnlPct)">@(pnlPct != null ? pnlPct.Value.ToString("+0.00;-0.00;0.00") + "%" : "—")</td>
+                                            <td><button class="btn btn-secondary btn-sm" @onclick="@(() => GoToAccount(account.Id))">→</button></td>
+                                        </tr>
+                                    }
                                 }
                             }
                             @foreach (var pos in standalonePositions)
                             {
                                 var cache = GetCache(pos.Symbol);
-                                var price = cache?.LastPrice;
-                                var dayChg = cache != null && cache.PreviousClose != 0
+                                var price = PortfolioService.GetEffectivePrice(pos, _priceCache);
+                                // Day change only applies to stocks (options don't have Yahoo previous-close)
+                                var dayChg = pos.AssetType == AssetType.Stock && cache != null && cache.PreviousClose != 0
                                     ? cache.LastPrice - cache.PreviousClose : (decimal?)null;
                                 var pnl = price.HasValue ? PortfolioService.CalculateUnrealizedPnL(pos, price.Value) : (decimal?)null;
                                 var marketValue = price.HasValue ? CalculatePositionMarketValue(pos) : (decimal?)null;
-                                var pnlPct = price.HasValue && pos.AverageCost != 0
-                                    ? (price.Value - pos.AverageCost) / pos.AverageCost * 100 : (decimal?)null;
+                                var pnlPct = price.HasValue && pos.AverageCost != 0 && pnl.HasValue
+                                    ? pnl.Value / (pos.AverageCost * pos.Quantity * (pos.AssetType == AssetType.Stock ? 1m : 100m)) * 100 : (decimal?)null;
                                 var violation = PortfolioService.IsRuleViolation(account, pos.AssetType, pos.Direction);
                                 <tr>
                                     <td>
@@ -347,6 +350,15 @@ else
     }
 
     private void GoToAccount(int id) => Nav.NavigateTo("/account/" + id);
+
+    // Collapsed spread groups
+    private readonly HashSet<string> _collapsedGroups = [];
+
+    private void ToggleGroup(string groupKey)
+    {
+        if (!_collapsedGroups.Add(groupKey))
+            _collapsedGroups.Remove(groupKey);
+    }
 
     private async Task SyncAccountAsync(Account account)
     {
@@ -530,7 +542,11 @@ else
     private decimal AccountTotalPnL(Account account) =>
         account.Positions
             .Where(p => p.IsOpen)
-            .Sum(p => GetCache(p.Symbol) is { } c ? PortfolioService.CalculateUnrealizedPnL(p, c.LastPrice) : 0m);
+            .Sum(p =>
+            {
+                var effectivePrice = PortfolioService.GetEffectivePrice(p, _priceCache);
+                return effectivePrice.HasValue ? PortfolioService.CalculateUnrealizedPnL(p, effectivePrice.Value) : 0m;
+            });
 
     private decimal AccountDayPnL(Account account) =>
         account.Positions
@@ -544,18 +560,22 @@ else
 
     private decimal CalculatePositionDayPnL(Position position)
     {
+        // Options don't have a Yahoo price-cache entry — their day change is not tracked here.
+        if (position.AssetType != AssetType.Stock) return 0m;
+
         var cache = GetCache(position.Symbol);
         if (cache is null)
             return 0m;
 
-        var multiplier = position.AssetType == AssetType.Stock ? 1m : 100m;
+        var multiplier = 1m; // stocks only in this path
         var delta = (cache.LastPrice - cache.PreviousClose) * position.Quantity * multiplier;
         return position.Direction == PositionDirection.Short ? -delta : delta;
     }
 
     private decimal CalculatePositionMarketValue(Position position)
     {
-        var price = GetCache(position.Symbol)?.LastPrice ?? position.AverageCost;
+        // Use the correct effective price: broker option premium for options, Yahoo price for stocks.
+        var price = PortfolioService.GetEffectivePrice(position, _priceCache) ?? position.AverageCost;
         var multiplier = position.AssetType == AssetType.Stock ? 1m : 100m;
         var signedQuantity = position.Direction == PositionDirection.Short ? -position.Quantity : position.Quantity;
         return price * signedQuantity * multiplier;

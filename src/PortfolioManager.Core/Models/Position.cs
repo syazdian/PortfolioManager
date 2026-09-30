@@ -23,6 +23,13 @@ public class Position
     /// <summary>For options: expiry date. Null for stocks.</summary>
     public DateTime? ExpiryDate { get; set; }
 
+    /// <summary>
+    /// Last market price provided by the broker at sync time.
+    /// For options this is the option premium price (not the underlying stock price).
+    /// Used as the live price source for options instead of the Yahoo stock ticker.
+    /// </summary>
+    public decimal? LastBrokerPrice { get; set; }
+
     public bool IsOpen { get; set; } = true;
 
     /// <summary>Optional label that groups related legs into a spread (e.g., "SNDK Bull Spread").</summary>
@@ -30,3 +37,4 @@ public class Position
 
     public ICollection<Transaction> Transactions { get; set; } = [];
 }
+

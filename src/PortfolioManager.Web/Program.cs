@@ -31,6 +31,12 @@ builder.Services.AddScoped<IBrokerPositionImportService, QuestradePositionImport
 // ── Price Feed ────────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<PriceState>();
 builder.Services.AddSingleton<YahooFinanceClient>();
+
+// RapidAPI for live option prices
+var rapidApiOptions = builder.Configuration.GetSection("RapidApi").Get<RapidApiOptions>() ?? new RapidApiOptions();
+builder.Services.AddSingleton(rapidApiOptions);
+builder.Services.AddSingleton<RapidApiOptionsClient>();
+
 builder.Services.AddSingleton<PriceRefreshService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<PriceRefreshService>());
 
@@ -62,6 +68,14 @@ using (var scope = app.Services.CreateScope())
     {
         await db.Database.ExecuteSqlRawAsync(
             "ALTER TABLE Accounts ADD COLUMN BrokerAccountId TEXT NOT NULL DEFAULT ''");
+    }
+    catch { /* column already exists */ }
+
+    // Safe schema migration: add LastBrokerPrice to Positions (stores broker's live option price)
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(
+            "ALTER TABLE Positions ADD COLUMN LastBrokerPrice REAL NULL");
     }
     catch { /* column already exists */ }
 }

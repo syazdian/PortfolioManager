@@ -108,9 +108,18 @@ else
                             foreach (var grp in grouped)
                             {
                                 var grpPnl = grp.Sum(p =>
-                                    GetCache(p.Symbol) is { } c
-                                    ? PortfolioService.CalculateUnrealizedPnL(p, c.LastPrice) : 0);
+                                {
+                                    var effectivePrice = PortfolioService.GetEffectivePrice(p, _priceCache);
+                                    return effectivePrice.HasValue ? PortfolioService.CalculateUnrealizedPnL(p, effectivePrice.Value) : 0m;
+                                });
+                                var grpMktVal = grp.Sum(p =>
+                                {
+                                    var effectivePrice = PortfolioService.GetEffectivePrice(p, _priceCache);
+                                    var mult = p.AssetType == AssetType.Stock ? 1m : 100m;
+                                    return effectivePrice.HasValue ? effectivePrice.Value * (p.Direction == PositionDirection.Short ? -p.Quantity : p.Quantity) * mult : 0m;
+                                });
                                 var grpQty = grp.Sum(p => p.Quantity * (p.Direction == PositionDirection.Short ? -1 : 1));
+                                var allHavePrice = grp.All(p => PortfolioService.GetEffectivePrice(p, _priceCache).HasValue);
                                 bool isExpanded = !_collapsedGroups.Contains(grp.Key);
 
                                 <!-- GROUP HEADER ROW -->
@@ -121,9 +130,10 @@ else
                                     </td>
                                     <td colspan="2" style="color:var(--text-muted);font-size:0.82em">@grp.Count() legs</td>
                                     <td class="text-right">@grpQty.ToString("+0.##;-0.##;0")</td>
-                                    <td colspan="5"></td>
-                                    <td class="text-right @PnlClass(grpPnl)">@grpPnl.ToString("+0.00;-0.00;0.00")</td>
-                                    <td colspan="2"></td>
+                                    <td colspan="4"></td>
+                                    <td class="text-right @PnlClass(allHavePrice ? grpMktVal : (decimal?)null)">@(allHavePrice ? grpMktVal.ToString("+0.00;-0.00;0.00") : "—")</td>
+                                    <td class="text-right @PnlClass(allHavePrice ? grpPnl : (decimal?)null)">@(allHavePrice ? grpPnl.ToString("+0.00;-0.00;0.00") : "—")</td>
+                                    <td colspan="3"></td>
                                 </tr>
 
                                 @if (isExpanded)
@@ -131,12 +141,12 @@ else
                                     foreach (var pos in grp)
                                     {
                                         var cache  = GetCache(pos.Symbol);
-                                        var price  = cache?.LastPrice;
+                                        var price  = PortfolioService.GetEffectivePrice(pos, _priceCache);
                                         var mult   = pos.AssetType == AssetType.Stock ? 1m : 100m;
-                                        var mktVal = price.HasValue ? price.Value * pos.Quantity * mult : (decimal?)null;
+                                        var mktVal = price.HasValue ? price.Value * (pos.Direction == PositionDirection.Short ? -pos.Quantity : pos.Quantity) * mult : (decimal?)null;
                                         var pnl    = price.HasValue ? PortfolioService.CalculateUnrealizedPnL(pos, price.Value) : (decimal?)null;
-                                        var pnlPct = price.HasValue && pos.AverageCost != 0
-                                            ? (price.Value - pos.AverageCost) / pos.AverageCost * 100 : (decimal?)null;
+                                        var pnlPct = price.HasValue && pos.AverageCost != 0 && pnl.HasValue
+                                            ? pnl.Value / (pos.AverageCost * pos.Quantity * mult) * 100 : (decimal?)null;
                                         var warn   = PortfolioService.IsRuleViolation(_account, pos.AssetType, pos.Direction);
 
                                         @if (_editingId == pos.Id)
@@ -207,12 +217,12 @@ else
                             foreach (var pos in standalone)
                             {
                                 var cache  = GetCache(pos.Symbol);
-                                var price  = cache?.LastPrice;
+                                var price  = PortfolioService.GetEffectivePrice(pos, _priceCache);
                                 var mult   = pos.AssetType == AssetType.Stock ? 1m : 100m;
-                                var mktVal = price.HasValue ? price.Value * pos.Quantity * mult : (decimal?)null;
+                                var mktVal = price.HasValue ? price.Value * (pos.Direction == PositionDirection.Short ? -pos.Quantity : pos.Quantity) * mult : (decimal?)null;
                                 var pnl    = price.HasValue ? PortfolioService.CalculateUnrealizedPnL(pos, price.Value) : (decimal?)null;
-                                var pnlPct = price.HasValue && pos.AverageCost != 0
-                                    ? (price.Value - pos.AverageCost) / pos.AverageCost * 100 : (decimal?)null;
+                                var pnlPct = price.HasValue && pos.AverageCost != 0 && pnl.HasValue
+                                    ? pnl.Value / (pos.AverageCost * pos.Quantity * mult) * 100 : (decimal?)null;
                                 var warn   = PortfolioService.IsRuleViolation(_account, pos.AssetType, pos.Direction);
 
                                 @if (_editingId == pos.Id)
@@ -309,7 +319,11 @@ else
     private static readonly System.Globalization.CultureInfo UsdCulture = new("en-US");
 
     private decimal TotalPnL => _positions
-        .Sum(p => GetCache(p.Symbol) is { } c ? PortfolioService.CalculateUnrealizedPnL(p, c.LastPrice) : 0);
+        .Sum(p =>
+        {
+            var effectivePrice = PortfolioService.GetEffectivePrice(p, _priceCache);
+            return effectivePrice.HasValue ? PortfolioService.CalculateUnrealizedPnL(p, effectivePrice.Value) : 0m;
+        });
 
     protected override async Task OnInitializedAsync()
     {

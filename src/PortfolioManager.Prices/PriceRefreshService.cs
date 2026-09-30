@@ -8,12 +8,15 @@ using PortfolioManager.Core.Models;
 namespace PortfolioManager.Prices;
 
 /// <summary>
-/// Background service that refreshes all position prices from Yahoo Finance every 15 minutes.
+/// Background service that refreshes all position prices every 15 minutes.
+/// • Stocks  → Yahoo Finance (crumb-based API, no key required)
+/// • Options → Yahoo Finance via RapidAPI (live option premium prices)
 /// Notifies <see cref="PriceState"/> so the UI can update "Last updated X min ago".
 /// </summary>
 public class PriceRefreshService(
     IServiceScopeFactory scopeFactory,
     YahooFinanceClient yahooClient,
+    RapidApiOptionsClient optionsClient,
     PriceState priceState,
     ILogger<PriceRefreshService> logger) : BackgroundService
 {
@@ -41,40 +44,63 @@ public class PriceRefreshService(
         try
         {
             using var scope = scopeFactory.CreateScope();
-            var dbFactory = scope.ServiceProvider.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<AppDbContext>>();
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
             await using var db = await dbFactory.CreateDbContextAsync(ct);
 
-            var symbols = await db.Positions
+            var openPositions = await db.Positions
                 .Where(p => p.IsOpen)
-                .Select(p => p.Symbol)
-                .Distinct()
                 .ToListAsync(ct);
 
-            if (symbols.Count == 0)
+            // ── 1. Stock prices from Yahoo Finance ───────────────────────────
+            var stockSymbols = openPositions
+                .Where(p => p.AssetType == AssetType.Stock)
+                .Select(p => p.Symbol)
+                .Distinct()
+                .ToList();
+
+            if (stockSymbols.Count > 0)
             {
-                priceState.NotifyUpdated();
-                return;
+                var fetched = await yahooClient.FetchPricesAsync(stockSymbols, ct);
+                foreach (var price in fetched)
+                {
+                    var existing = await db.PriceCache.FindAsync([price.Symbol], ct);
+                    if (existing is null)
+                        db.PriceCache.Add(price);
+                    else
+                    {
+                        existing.LastPrice    = price.LastPrice;
+                        existing.PreviousClose = price.PreviousClose;
+                        existing.Currency     = price.Currency;
+                        existing.FetchedAt    = price.FetchedAt;
+                    }
+                }
+                logger.LogInformation("Stock prices refreshed for {Count} symbols.", fetched.Count);
             }
 
-            var fetched = await yahooClient.FetchPricesAsync(symbols, ct);
+            // ── 2. Option prices from RapidAPI Yahoo Finance ─────────────────
+            var optionPositions = openPositions
+                .Where(p => p.AssetType != AssetType.Stock &&
+                            p.ExpiryDate.HasValue &&
+                            p.StrikePrice.HasValue)
+                .ToList();
 
-            foreach (var price in fetched)
+            if (optionPositions.Count > 0)
             {
-                var existing = await db.PriceCache.FindAsync([price.Symbol], ct);
-                if (existing is null)
-                    db.PriceCache.Add(price);
-                else
+                var optionPrices = await optionsClient.FetchOptionPricesAsync(optionPositions, ct);
+
+                foreach (var (positionId, price) in optionPrices)
                 {
-                    existing.LastPrice = price.LastPrice;
-                    existing.PreviousClose = price.PreviousClose;
-                    existing.Currency = price.Currency;
-                    existing.FetchedAt = price.FetchedAt;
+                    var pos = openPositions.FirstOrDefault(p => p.Id == positionId);
+                    if (pos is not null)
+                        pos.LastBrokerPrice = price;
                 }
+
+                logger.LogInformation("Option prices refreshed for {Count} positions.", optionPrices.Count);
             }
 
             await db.SaveChangesAsync(ct);
             priceState.NotifyUpdated();
-            logger.LogInformation("Prices refreshed for {Count} symbols at {Time:u}", fetched.Count, DateTime.UtcNow);
+            logger.LogInformation("Price refresh complete at {Time:u}.", DateTime.UtcNow);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
